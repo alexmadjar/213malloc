@@ -1,0 +1,94 @@
+Bitwise Trie
+--------
+
+
+Trie Structure
+
+The root of the trie contains a single pointer to the first node. There are no
+requirements about the key of this first node.
+
+
+Trie Node
+
+Each trie node contains two pointers to a left an right child node. All the
+nodes in the left subtree are guaranteed to be less than the nodes in the
+right subtree; however, the value of the parent node has no relation with any
+of the children. This seems counter-intuitive at first, but it will make sense
+as we go through the algorithms.
+
+The key for each node is the size of the free chunk. The value is a pointer to
+the beginning of the free chunk. Given the pointer to a free chunk, we should
+be able to get it's size.
+
+
+Insert Operation
+
+insert(size_t size, void *value)
+
+Check if the root pointer is NULL. Insert that new node as the head of the
+trie, and return.
+
+Otherwise, we need to scan the bits of 'size' from left-to-right, starting
+with what we will denote bit 0. We get a pointer to the head node, what we
+will call the current node. Using bit 0, we take either the left or right
+child node (0 corresponds to left, 1 corresponds to right). If this child node
+is NULL, then we create a new node and attach it as the left/right child.
+
+Otherwise, we set the current node to the proper non-NULL left/right child. We
+then iterate the above process using the next bit (now bit 1). We continue
+this process until we find a NULL node.
+
+Note: If we try to insert a node that already exists, bad things will happen.
+You should prefix each iteration with a check to verify that our key (the
+size) does not exactly match the key of the current node.
+
+
+Find Operation
+
+void *find(size_t size)
+
+Check if the root pointer is NULL. If so, return NULL.
+
+Otherwise, we scan the bits of 'size' from left-to-right, starting with what
+we will denote as bit 0. We obtain a pointer to the head node, which we will
+call the current node.
+
+Check if the current node's key and the desired key match. If so, return the
+current node value. Otherwise, using bit 0, we take either the left or right
+child node. If this child is NULL, then the desired node does not exist, and
+return NULL.
+
+Otherwise, we set the current node to the proper non-NULL left/right child. We
+then iterate the above process using the next bit (now bit 1). We continue
+this process until we reach a NULL or find the node we want.
+
+
+Best-Fit Operation
+
+void *bestfit(size_t size)
+
+Check if the root pointer is NULL. If so, return NULL.
+
+Otherwise, we scan the bits of 'size' from left-to-right, starting with what
+we will denote as bit 0. We obtain a pointer to the head node, which we will
+call the current node. We set a pointer, which we will call the best-fit
+pointer, to NULL.
+
+We check the current node's size, if it is larger than the desired size. If
+so, then we have a possible best fit. If the best-fit pointer is NULL, then it
+is our best fit; otherwise, if the current node's size is less than the
+best-fit pointer's size, then we have a new best fit and update the best-fit
+pointer accordingly.
+
+
+Remove Operation
+
+void remove(size_t size)
+
+Find the node using the find operation. Replace the node with any child node.
+Since there is no requirement on ordering of the parent with respect to it's
+children, it does not matter which child you pick. It also guarantees that the
+left subtree is still strictly less than the right subtree.
+
+(The code I have suggests using the right-most child node, it offset places
+where the left-most node is preferred)

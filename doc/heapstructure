@@ -1,0 +1,40 @@
+max alloc size is 262136 Bytes (or 0b111111111111111000 or 14 0's, 15 1's and 3 0's)
+because 256kB and larger are best done using mmap
+
+min alloc size is 4*sizeof(void*) => 16
+because free nodes contain:
+node** prev // a pointer to the node* that points here
+node* next  // a pointer to the next node in the stack of the same size
+node* left  // a pointer to the left child in the trie
+node* right // a pointer to the right child in the trie
+
+every block (whether free or allocated) has a 1 WORD (from here on WORD is defined as sizeof(void*)=4 bytes) header and footer:
+isAllocated = 0 or 1
+size = 8 byte aligned byte-size of the block (not including the header / footer)
+header/footer = size BITWISEOR isAllocated
+
+We create 14 bins of sizes by the number of zeros before the first 1 in the size (the clz function)
+because clz(max_size) = 14 and clz(min_size) = 27
+clz(size)-14 = bin number (0 through 13 inclusive)
+
+We divide the heap space as such: (key: *=pointer, not a size; in increasing address space)
+*heap base*
+unused padding bytes for alignment +
+14 WORDs for the size buckets
+1 WORD set to "1"
+*official heap start pointer*
+1 WORD set to "1" - prologue
+X BLOCKS OF FREE AND ALLOCATED MEMORY
+1 WORD set to "1" - epilog
+usused padding bytes - "the wilderness"
+*brk pointer / end of heap*
+
++ NOTE: in a production malloc we would use this padding to ensure that all valid pointers are 8 byte aligned and discard all free calls with non-aligned pointers. Do we need this level of robustness?
+
+INVARIANTS:   Things that should always be the case
+
+* There are never two free blocks in a row (ie: no deferred coalescing)
+* The structure starting with the 14 buckets, going through the trie and into the stacks contains ALL free nodes exactly once and contains no allocated nodes nor "garbage" pointers
+* All sizes and pointers are 8 byte aligned
+* You should be able to crawl through the entire heap forward or backward at any time using the headers / footers
+

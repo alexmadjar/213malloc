@@ -1,7 +1,7 @@
 #
 # Students' Makefile for the Malloc Lab
 #
-TEAM = `whoami`
+TEAM = `amm668`
 VERSION = `date +%Y%m%d%H%M%S`
 PROJ = malloclab
 

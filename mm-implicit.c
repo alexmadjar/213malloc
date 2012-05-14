@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <unistd.h>
+#include <string.h>
 
 #include "mm.h"
 #include "memlib.h"
@@ -54,6 +55,11 @@ team_t team = {
 
 //Global
 char* heap_listp;
+
+static void *extend_heap(size_t words);
+static void *coalesce(void *bp);
+static void place(void* bp, size_t asize);
+static void *find_fit(size_t asize);
 
 /* 
  * mm_init - initialize the malloc package.
@@ -200,7 +206,7 @@ void *mm_realloc(void *ptr, size_t size)
     newptr = mm_malloc(size);
     if (newptr == NULL)
       return NULL;
-    copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
+    copySize = *(size_t *)((char *)oldptr - 8);
     if (size < copySize)
       copySize = size;
     memcpy(newptr, oldptr, copySize);

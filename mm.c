@@ -61,6 +61,8 @@ static inline void *coalesce(void *bp);
 static inline void place(void* bp, size_t asize);
 static inline void *find_fit(size_t asize);
 
+int mm_check(void);
+
 /* 
  * mm_init - initialize the malloc package.
  */
@@ -102,8 +104,11 @@ static inline void *extend_heap(size_t words) {
 void mm_free(void *bp){
   size_t size = GET_SIZE(HDRP(bp));
   PUT(HDRP(bp),PACK(size, 0));
-  PUT(FTRP(bp),PACK(size, 0));
+  PUT(FTRP(bp),PACK(size, 0)); 
   coalesce(bp);
+  if (!mm_check()) {
+    fprintf(stderr, "mm_check failed!!!!!!!!\n");
+  }
 }
 
 static inline void *coalesce(void *bp)
@@ -157,6 +162,9 @@ void *mm_malloc(size_t size)
   if ((bp = extend_heap(extendsize/WSIZE)) == NULL)
     return NULL;
   place(bp, asize);
+  if (!mm_check()) {
+    fprintf(stderr, "mm_check failed\n");
+  }
   return bp;
 }
 
@@ -187,12 +195,6 @@ static inline void place(void* bp, size_t asize) {
 
 }
 
-
-
-
-
-
-
 /*
  * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
  * HINT: this will always work, so save making this more efficient for later
@@ -213,6 +215,41 @@ void *mm_realloc(void *ptr, size_t size)
     mm_free(oldptr);
     return newptr;
 }
+
+
+int uncoalesced(void);
+
+// returns 0 IFF problem
+int mm_check(void) {
+  if(uncoalesced()) {
+    fprintf(stderr, "Some blocks escaped coalescing!\n");
+    return 0;
+  }
+  return 1;
+  //return !(uncoalesced());
+}
+
+// returns the number of uncoalesced, neighboring blocks
+int uncoalesced(void) {
+  void *bp;
+  int previous_free = 0;
+  int number = 0;
+  for (bp = heap_listp; GET_SIZE(HDRP(bp))>0; bp = NEXT_BLKP(bp)) {
+    if (!GET_ALLOC(HDRP(bp))) {
+      if (previous_free) {
+        number++;
+      }
+      previous_free = 1;
+    } else {
+      previous_free = 0;
+    }
+  }
+  return number;
+}
+
+
+
+
 
 
 

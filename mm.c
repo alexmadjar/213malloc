@@ -44,7 +44,7 @@ team_t team = {
     ""
 };
 
-// Global Variable
+// My Global Variable
 char* heap_listp;  // Pointer to the start of the implicit heap list
 
 //  Turn debugging code on
@@ -91,7 +91,6 @@ struct freenode
 #define BINS_SIZE ((size_t)(BIT_COUNT * POINTER_SIZE))
 #define BIN_OFFSET ((size_t)(BINS_SIZE + WSIZE))
 
-
 #define MAX(x, y) ((x) > (y)? (x) : (y))
 /* Pack a size and allocated bit into a word */
 #define PACK(size, alloc)  ((size) | (alloc))
@@ -107,6 +106,10 @@ struct freenode
 #define PREV_BLKP(bp) ((char *)(bp) - DSIZE - GET_SIZE(((char *)(bp) - DSIZE)))
 // zero indexed from most significant bit bit-accessor for unsigned long 
 #define BIT_N(s,n) ((((long unsigned int)(s))>>((BITNESS - 1) - (n))) & ((long unsigned int)(1)))
+// Gets the bin number for a size: note larger sizes -> smaller bin number
+#define BIN_FOR(asize) ((__builtin_clzl(asize))-BIT_OFFSET)
+#define BINP_AT(n) ((struct freenode **)(((heap_listp)-BIN_OFFSET)+(n*POINTER_SIZE)))
+
 
 // Basic internal implicit list / heap operations
 static inline void *extend_heap(size_t bytes); /* grow heap bytes size */
@@ -304,8 +307,6 @@ static inline void place(void* bp, size_t asize) {
   }
 }
 
-/////// REWRITTEN THROUGH HERE
-
 /*
  * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
  * HINT: this will always work, so save making this more efficient for later
@@ -327,19 +328,58 @@ void *mm_realloc(void *ptr, size_t size)
     return newptr;
 }
 
+/////////////////////
+// freelist code
+////////////////////
+
+// REWRITEN THROUGH HERE
+
+static void *freelist_add(void *bp) {
+  
+}
+
+static void freelist_remove(void *bp) {
+  
+}
+
+static void *freelist_bestfit(size_t sz) {
+  
+}
+
+
+//////////////////
 // DEBUG ONLY CODE
+//////////////////
 #if DEBUG
 
 int uncoalesced(void);
+int inconsistant_footer(void);
+int ends_in_epilogue(void);
 
 // returns 0 IFF problem
 int mm_check(void) {
+  if(! ends_in_epilogue()) {
+    fprintf(stderr, "!! The heap doesn't end in an epilogue!\n");
+    return 0;
+  }
+  if(inconsistant_footer()) {
+    fprintf(stderr, "!! Some blocks have inconsistant headers and footers!\n");
+    return 0;
+  }
   if(uncoalesced()) {
-    fprintf(stderr, "Some blocks escaped coalescing!\n");
+    fprintf(stderr, "!! Some blocks escaped coalescing!\n");
     return 0;
   }
   return 1;
-  //return !(uncoalesced());
+}
+
+int ends_in_epilogue(void) {
+  void* ep = mem_heap_hi() + 1 - WSIZE;
+  if (GET(ep) != PACK(0,1)) {
+    return 0;
+  } else {
+    return 1;
+  }
 }
 
 // returns the number of uncoalesced, neighboring blocks
@@ -355,6 +395,17 @@ int uncoalesced(void) {
       previous_free = 1;
     } else {
       previous_free = 0;
+    }
+  }
+  return number;
+}
+
+int inconsistant_footer(void) {
+  void *bp;
+  int number = 0;
+  for (bp = heap_listp; GET_SIZE(HEADER(bp))>0; bp = NEXT_BLKP(bp)) {
+    if (HEADER(bp) != FOOTER(bp)) {
+      number++;
     }
   }
   return number;

@@ -8,13 +8,16 @@
  * 
  * 
  * Important notes about this implementation:
- *    - There is no error checking
- *    - "int" is assumed to be 1 word and "long" to be the same size as "void *"
- *    
+ *    - There is no error checking without debug turned on
+ *    - "int" is assumed to be 1 word
+ *  
+ * For a more complete description, see the comment at the end of the file.
+ *
+ * Author: Alex Madjar
+ * License:  Don't use this for anything besides grading me (yet because it's not ready!)
  */
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
 #include <assert.h>
 #include <unistd.h>
 #include <string.h>

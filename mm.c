@@ -288,8 +288,6 @@ static inline void *find_fit(size_t asize)
 }
 
 
-/////// REWRITTEN THROUGH HERE
-
 
 // actually allocate this block with size asize
 static inline void place(void* bp, size_t asize) {
@@ -301,12 +299,14 @@ static inline void place(void* bp, size_t asize) {
     bp = NEXT_BLKP(bp);
     PUT(HEADER(bp), PACK(csize-asize, 0));
     PUT(FOOTER(bp), PACK(csize-asize, 0));
+    freelist_add(bp);
   } else {
     PUT(HEADER(bp), PACK(csize, 1));
     PUT(FOOTER(bp), PACK(csize, 1));
   }
-
 }
+
+/////// REWRITTEN THROUGH HERE
 
 /*
  * mm_realloc - Implemented simply in terms of mm_malloc and mm_free

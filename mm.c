@@ -196,19 +196,25 @@ void mm_free(void *bp){
 // returning a pointer to that newly added block
 static inline void *coalesce(void *bp)
 {
-  size_t prev_alloc = GET_ALLOC(FOOTER(PREV_BLKP(bp)));
-  size_t next_alloc = GET_ALLOC(HEADER(NEXT_BLKP(bp)));
+  WTYPE prev_alloc = IS_ALLOC(FOOTER(PREV_BLKP(bp)));
+  WTYPE next_alloc = IS_ALLOC(HEADER(NEXT_BLKP(bp)));
   size_t size = GET_SIZE(HEADER(bp));
   if (prev_alloc && next_alloc) {
     // no op
   }
   else if (prev_alloc && !next_alloc) {
+    #if DEBUG>1
+      fprintf(stderr, "Coalescing %p with next block\n", bp);
+    #endif
     freelist_remove(NEXT_BLKP(bp));
     size += DSIZE + GET_SIZE(HEADER(NEXT_BLKP(bp)));
     PUT(HEADER(bp), PACK(size, 0));
-    PUT(FOOTER(bp), PACK(size,0));
+    PUT(FOOTER(bp), PACK(size, 0));
   }
   else if (!prev_alloc && next_alloc) {
+    #if DEBUG>1
+      fprintf(stderr, "Coalescing %p with previous block\n", bp);
+    #endif
     freelist_remove(PREV_BLKP(bp));
     size += DSIZE + GET_SIZE(HEADER(PREV_BLKP(bp)));
     PUT(FOOTER(bp), PACK(size, 0));
@@ -216,6 +222,9 @@ static inline void *coalesce(void *bp)
     bp = PREV_BLKP(bp);
   }
   else {
+    #if DEBUG>1
+      fprintf(stderr, "Coalescing %p with neighboring blocks\n", bp);
+    #endif
     freelist_remove(PREV_BLKP(bp));
     freelist_remove(NEXT_BLKP(bp));
     size += GET_SIZE(HEADER(PREV_BLKP(bp))) +
@@ -227,52 +236,59 @@ static inline void *coalesce(void *bp)
   return freelist_add(bp); 
 }
 
-/////// REWRITTEN THROUGH HERE
-
-
 void *mm_malloc(size_t size)
 {
-  size_t asize;
+  #if DEBUG>1
+    fprintf(stderr, "+malloc called with size=%lu\n", size);
+  #endif
   size_t extendsize;
   char *bp;
+  // Ignore spurious requests
   if (size == 0)
     return NULL;
   /* Adjust block size to include overhead and alignment reqs. */
-  if (size <= DSIZE)
-    asize = 2*DSIZE;
+  if (size < MIN_SIZE)
+    size = MIN_SIZE;
   else
-    asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
+    size = ALIGN(size);
   /* Search the free list for a fit */
-  if ((bp = find_fit(asize)) != NULL) {
-    place(bp, asize);
-    return bp;
+  if ((bp = find_fit(size)) != NULL) {
+    place(bp, size);
+  } else {
+    bp = NULL;
   }
-  /* No fit found. Get more memory and place the block */
-  extendsize = MAX(asize,CHUNKSIZE);
-  if ((bp = extend_heap(extendsize)) == NULL)
-    return NULL;
-  place(bp, asize);
-  if (!mm_check()) {
-    fprintf(stderr, "mm_check failed\n");
-  }
+  #if DEBUG
+    if (!mm_check()) {
+      fprintf(stderr, "!!!!!!!!! mm_check failed !!!!!!!!!!\n");
+      return NULL;
+    }
+  #endif
   return bp;
 }
 
+/////// REWRITTEN THROUGH HERE
 
+// finds best fit or allocates new space if needed
 static inline void *find_fit(size_t asize)
 {
   void *bp;
   for (bp = heap_listp; GET_SIZE(HEADER(bp))>0; bp = NEXT_BLKP(bp)) {
-    if (!GET_ALLOC(HEADER(bp)) && (asize <= GET_SIZE(HEADER(bp))))
+    if (!IS_ALLOC(HEADER(bp)) && (asize <= GET_SIZE(HEADER(bp))))
       return bp;
   }
-  return NULL;
+
+  /* No fit found. Get more memory and place the block */
+  extendsize = MAX(asize,CHUNKSIZE);
+  if ((bp = extend_heap(extendsize)) == NULL)
+    return NULL;
+  return bp;
 }
 
+// actually allocate this block with size asize
 static inline void place(void* bp, size_t asize) {
   size_t csize = GET_SIZE(HEADER(bp));
 
-  if ((csize - asize) >= (2*DSIZE)) {
+  if ((csize - asize) >= MIN_SIZE) {
     PUT(HEADER(bp), PACK(asize, 1));
     PUT(FOOTER(bp), PACK(asize, 1));
     bp = NEXT_BLKP(bp);
@@ -327,7 +343,7 @@ int uncoalesced(void) {
   int previous_free = 0;
   int number = 0;
   for (bp = heap_listp; GET_SIZE(HEADER(bp))>0; bp = NEXT_BLKP(bp)) {
-    if (!GET_ALLOC(HEADER(bp))) {
+    if (!IS_ALLOC(HEADER(bp))) {
       if (previous_free) {
         number++;
       }

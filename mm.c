@@ -41,7 +41,12 @@ team_t team = {
 // Global Variable
 char* heap_listp;  // Pointer to the start of the implicit heap list
 
-
+//  Turn debugging code on
+//     0 -> no debugging checks or output
+//     1 -> low level checks
+//     2 -> verbose output
+//  All debug output is sent to stderr
+#define DEBUG (2)
 
 /* single word (4) or double word (8) alignment */
 #define ALIGNMENT 8
@@ -86,9 +91,9 @@ static inline void *extend_heap(size_t bytes);
 static inline void *coalesce(void *bp);
 static inline void place(void* bp, size_t asize);
 static inline void *find_fit(size_t asize);
-
+#if DEBUG
 int mm_check(void);
-
+#endif
 // freelist functions
 static void freelist_add(void *bp);
 static void freelist_remove(void *bp);
@@ -99,6 +104,9 @@ static void *freelist_bestfit(size_t sz);
  */
 int mm_init(void)
 {
+#if DEBUG>1
+   fprintf(stderr, "Initializing heap with %lu BINS_SIZE\n", BINS_SIZE);
+#endif
    /* Create the initial empty heap */
    if ((heap_listp = mem_sbrk((4*WSIZE) + BINS_SIZE)) == (void *)-1)
      return -1;
@@ -119,10 +127,18 @@ int mm_init(void)
   return 0;
 }
 
-// NOTE: Doesn't check for words > 
 static inline void *extend_heap(size_t bytes) {
+#if DEBUG>1
+  fprintf(stderr, "extending the heap by %lu bytes\n", bytes);
+#endif
   char *bp;
   size_t size;
+#if DEBUG
+  if (bytes < MIN_SIZE) {
+    fprintf(stderr, "!!! Tried to extend heap by %lu bytes!\n", bytes);
+    return NULL;
+  }
+#endif
   /* Allocate an even number of words to maintain alignment */
   size = ALIGN(bytes)
   if ((long)(bp = mem_sbrk(size)) == -1)
@@ -141,12 +157,17 @@ static inline void *extend_heap(size_t bytes) {
 
 void mm_free(void *bp){
   size_t size = GET_SIZE(HEADER(bp));
+#if DEBUG>1
+  fprintf(stderr, "Call to free with pointer %p (size: %lu)\n", bp, size);
+#endif
   PUT(HEADER(bp),PACK(size, 0));
   PUT(FOOTER(bp),PACK(size, 0)); 
   coalesce(bp);
+#if DEBUG
   if (!mm_check()) {
     fprintf(stderr, "!!!!!!!!!mm_check failed!!!!!!!!\n");
   }
+#endif
 }
 
 
@@ -262,6 +283,8 @@ void *mm_realloc(void *ptr, size_t size)
     return newptr;
 }
 
+// DEBUG ONLY CODE
+#if DEBUG
 
 int uncoalesced(void);
 
@@ -293,8 +316,8 @@ int uncoalesced(void) {
   return number;
 }
 
-
-
+// END DEBUG CODE
+#endif
 
 
 

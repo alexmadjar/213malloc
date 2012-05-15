@@ -16,6 +16,12 @@
  * Author: Alex Madjar
  * License:  Don't use this for anything besides grading me (yet because it's not ready!)
  */
+
+/*  Experiments to run:
+ *  - inline keyword
+ *  - which node in trie for bestfit
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -288,7 +294,7 @@ static inline void *find_fit(size_t asize)
 // actually allocate this block with size asize
 static inline void place(void* bp, size_t asize) {
   size_t csize = GET_SIZE(HEADER(bp));
-
+  freelist_remove(bp);
   if ((csize - asize) >= MIN_SIZE) {
     PUT(HEADER(bp), PACK(asize, 1));
     PUT(FOOTER(bp), PACK(asize, 1));

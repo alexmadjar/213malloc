@@ -11,3 +11,8 @@ mdriver
 *.lai
 *.la
 *.a
+
+# OS Files
+.DS_Store
+icons*
+

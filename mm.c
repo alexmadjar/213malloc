@@ -115,7 +115,7 @@ int mm_check(void);
 #endif
 
 // explicit freelist functions
-static void freelist_add(void *bp);
+static void *freelist_add(void *bp);
 static void freelist_remove(void *bp);
 static void *freelist_bestfit(size_t sz);
 
@@ -161,9 +161,8 @@ static inline void *extend_heap(size_t bytes) {
   #endif
   /* Allocate an even number of words to maintain alignment */
   size = ALIGN(bytes)
-  if ((long)(bp = mem_sbrk(size)) == -1)
+  if ((long)(bp = mem_sbrk(DSIZE+size)) == -1)
       return NULL;
-  size -= DSIZE;
   /* Initialize free block header/footer and the epilogue header */
   PUT(HEADER(bp), PACK(size, 0)); /* Free block header */
   PUT(FOOTER(bp), PACK(size, 0)); /* Free block footer */
@@ -190,9 +189,6 @@ void mm_free(void *bp){
   #endif
 }
 
-
-/////// REWRITTEN THROUGH HERE
-
 // coalesce takes a pointer to a block
 // that is NOT in the free list
 // tries to merge it with its neighbors
@@ -204,28 +200,35 @@ static inline void *coalesce(void *bp)
   size_t next_alloc = GET_ALLOC(HEADER(NEXT_BLKP(bp)));
   size_t size = GET_SIZE(HEADER(bp));
   if (prev_alloc && next_alloc) {
-    return bp;
+    // no op
   }
   else if (prev_alloc && !next_alloc) {
-    size += GET_SIZE(HEADER(NEXT_BLKP(bp)));
+    freelist_remove(NEXT_BLKP(bp));
+    size += DSIZE + GET_SIZE(HEADER(NEXT_BLKP(bp)));
     PUT(HEADER(bp), PACK(size, 0));
     PUT(FOOTER(bp), PACK(size,0));
   }
   else if (!prev_alloc && next_alloc) {
-    size += GET_SIZE(HEADER(PREV_BLKP(bp)));
+    freelist_remove(PREV_BLKP(bp));
+    size += DSIZE + GET_SIZE(HEADER(PREV_BLKP(bp)));
     PUT(FOOTER(bp), PACK(size, 0));
     PUT(HEADER(PREV_BLKP(bp)), PACK(size, 0));
     bp = PREV_BLKP(bp);
   }
   else {
+    freelist_remove(PREV_BLKP(bp));
+    freelist_remove(NEXT_BLKP(bp));
     size += GET_SIZE(HEADER(PREV_BLKP(bp))) +
-    GET_SIZE(FOOTER(NEXT_BLKP(bp)));
+    GET_SIZE(FOOTER(NEXT_BLKP(bp))) + (DSIZE*2);
     PUT(HEADER(PREV_BLKP(bp)), PACK(size, 0));
     PUT(FOOTER(NEXT_BLKP(bp)), PACK(size, 0));
     bp = PREV_BLKP(bp);
   }
-  return bp; 
+  return freelist_add(bp); 
 }
+
+/////// REWRITTEN THROUGH HERE
+
 
 void *mm_malloc(size_t size)
 {

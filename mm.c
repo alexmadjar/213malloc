@@ -38,9 +38,6 @@ team_t team = {
     ""
 };
 
-
-
-
 // Global Variable
 char* heap_listp;  // Pointer to the start of the implicit heap list
 
@@ -59,21 +56,35 @@ char* heap_listp;  // Pointer to the start of the implicit heap list
  */
 #define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~(ALIGNMENT-1))
 
-/* Basic constants*/
+/* Basic constants and types*/
 #ifndef NULL
 #define NULL ((void *)(0))
 #endif
+/* struct freenode
+ *
+ * This is the structure _inside_ the freespace (doesn't include header/footer)
+ *
+ */
+struct freenode 
+{
+  struct freenode *next;  // next freenode of the same size (stack)
+  struct freenode *left;  // left b-trie child
+  struct freenode *right; // right b-trie child
+  struct freenode **prev; // pointer to the _only_ pointer that points here
+};
 #define WSIZE       (4)       /* Word and header/footer size (bytes) */
 #define WTYPE       unsigned int  // type to use for word sized ints
-#define DSIZE       (8)       /* Double word size (bytes) */
+#define DSIZE       (2*WSIZE)       /* Double word size (bytes) */
 #define CHUNKSIZE  (1<<12)  /* Extend heap by this amount (bytes) */
 #define POINTER_SIZE (sizeof(void *)) /* size of pointers */
-#define MIN_SIZE ((size_t)(ALIGN(4*POINTER_SIZE)))
+#define BITNESS  (8*sizeof(long unsigned int))
+#define MIN_SIZE ((size_t)(ALIGN(sizeof(struct freenode))))
 #define MAX_SIZE ((size_t)((1<<18)-1))
 #define BIT_OFFSET (__builtin_clzl(MAX_SIZE))
-#define BIT_COUNT  ((size_t)(1 + (__builtin_clzl(MIN_SIZE)) - BIT_OFFSET))
+#define BIT_COUNT  (1 + (__builtin_clzl(MIN_SIZE)) - BIT_OFFSET)
 #define BINS_SIZE ((size_t)(BIT_COUNT * POINTER_SIZE))
 #define BIN_OFFSET ((size_t)(BINS_SIZE + WSIZE))
+
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))
 /* Pack a size and allocated bit into a word */
@@ -84,20 +95,26 @@ char* heap_listp;  // Pointer to the start of the implicit heap list
 /* Read the size and allocated fields from address p */
 #define GET_SIZE(p)  (GET(p) & ~0x7)
 #define IS_ALLOC(p) (GET(p) & 0x1)
-
 #define HEADER(bp) ((char *)(bp) - WSIZE)
 #define FOOTER(bp) ((char *)(bp) + GET_SIZE(HEADER(bp)) - DSIZE)
 #define NEXT_BLKP(bp) ((char *)(bp) + DSIZE + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp) - DSIZE - GET_SIZE(((char *)(bp) - DSIZE)))
+// zero indexed from most significant bit bit-accessor for unsigned long 
+#define BIT_N(s,n) ((((long unsigned int)(s))>>((BITNESS - 1) - (n))) & ((long unsigned int)(1)))
 
-static inline void *extend_heap(size_t bytes);
-static inline void *coalesce(void *bp);
-static inline void place(void* bp, size_t asize);
+// Basic internal implicit list / heap operations
+static inline void *extend_heap(size_t bytes); /* grow heap bytes size */
+static inline void *coalesce(void *bp); /* merge newly free block with neighbors 
+                                             and add to freelist */
+/* allocate asize at bp (possibly spliting) and remove from freelist */
+static inline void place(void* bp, size_t asize); 
 static inline void *find_fit(size_t asize);
+
 #if DEBUG
 int mm_check(void);
 #endif
-// freelist functions
+
+// explicit freelist functions
 static void freelist_add(void *bp);
 static void freelist_remove(void *bp);
 static void *freelist_bestfit(size_t sz);
@@ -107,9 +124,9 @@ static void *freelist_bestfit(size_t sz);
  */
 int mm_init(void)
 {
-#if DEBUG>1
-   fprintf(stderr, "Initializing heap with %lu BINS_SIZE\n", BINS_SIZE);
-#endif
+   #if DEBUG>1
+      fprintf(stderr, "Initializing heap with %lu BINS_SIZE\n", BINS_SIZE);
+   #endif
    /* Create the initial empty heap */
    if ((heap_listp = mem_sbrk((4*WSIZE) + BINS_SIZE)) == (void *)-1)
      return -1;
@@ -131,17 +148,17 @@ int mm_init(void)
 }
 
 static inline void *extend_heap(size_t bytes) {
-#if DEBUG>1
-  fprintf(stderr, "extending the heap by %lu bytes\n", bytes);
-#endif
+  #if DEBUG>1
+    fprintf(stderr, "extending the heap by %lu bytes\n", bytes);
+  #endif
   char *bp;
   size_t size;
-#if DEBUG
-  if (bytes < MIN_SIZE) {
-    fprintf(stderr, "!!! Tried to extend heap by %lu bytes!\n", bytes);
-    return NULL;
-  }
-#endif
+  #if DEBUG
+    if (bytes < MIN_SIZE) {
+      fprintf(stderr, "!!! Tried to extend heap by %lu bytes!\n", bytes);
+      return NULL;
+    }
+  #endif
   /* Allocate an even number of words to maintain alignment */
   size = ALIGN(bytes)
   if ((long)(bp = mem_sbrk(size)) == -1)
@@ -160,17 +177,17 @@ static inline void *extend_heap(size_t bytes) {
 
 void mm_free(void *bp){
   size_t size = GET_SIZE(HEADER(bp));
-#if DEBUG>1
-  fprintf(stderr, "Call to free with pointer %p (size: %lu)\n", bp, size);
-#endif
+  #if DEBUG>1
+    fprintf(stderr, "Call to free with pointer %p (size: %lu)\n", bp, size);
+  #endif
   PUT(HEADER(bp),PACK(size, 0));
   PUT(FOOTER(bp),PACK(size, 0)); 
   coalesce(bp);
-#if DEBUG
-  if (!mm_check()) {
-    fprintf(stderr, "!!!!!!!!!mm_check failed!!!!!!!!\n");
-  }
-#endif
+  #if DEBUG
+    if (!mm_check()) {
+      fprintf(stderr, "!!!!!!!!!mm_check failed!!!!!!!!\n");
+    }
+  #endif
 }
 
 

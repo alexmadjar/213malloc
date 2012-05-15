@@ -108,6 +108,7 @@ static inline void *coalesce(void *bp); /* merge newly free block with neighbors
                                              and add to freelist */
 /* allocate asize at bp (possibly spliting) and remove from freelist */
 static inline void place(void* bp, size_t asize); 
+/* finds best fit in the free list or allocates new space if not */
 static inline void *find_fit(size_t asize);
 
 #if DEBUG
@@ -254,8 +255,6 @@ void *mm_malloc(size_t size)
   /* Search the free list for a fit */
   if ((bp = find_fit(size)) != NULL) {
     place(bp, size);
-  } else {
-    bp = NULL;
   }
   #if DEBUG
     if (!mm_check()) {
@@ -266,23 +265,25 @@ void *mm_malloc(size_t size)
   return bp;
 }
 
-/////// REWRITTEN THROUGH HERE
-
 // finds best fit or allocates new space if needed
+// NOTE: asize is pre-aligned
 static inline void *find_fit(size_t asize)
 {
+  size_t extendsize;
   void *bp;
-  for (bp = heap_listp; GET_SIZE(HEADER(bp))>0; bp = NEXT_BLKP(bp)) {
-    if (!IS_ALLOC(HEADER(bp)) && (asize <= GET_SIZE(HEADER(bp))))
-      return bp;
+  if ((bp = freelist_bestfit(asize)) != NULL) {
+    return bp;
   }
 
   /* No fit found. Get more memory and place the block */
   extendsize = MAX(asize,CHUNKSIZE);
-  if ((bp = extend_heap(extendsize)) == NULL)
-    return NULL;
-  return bp;
+  // TODO: Remove possible inefficiency of adding then immediately removing noew space
+  return extend_heap(extendsize)
 }
+
+
+/////// REWRITTEN THROUGH HERE
+
 
 // actually allocate this block with size asize
 static inline void place(void* bp, size_t asize) {

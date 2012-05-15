@@ -287,18 +287,16 @@ static inline void *find_fit(size_t asize)
   return extend_heap(extendsize)
 }
 
-
-
 // actually allocate this block with size asize
 static inline void place(void* bp, size_t asize) {
   size_t csize = GET_SIZE(HEADER(bp));
   freelist_remove(bp);
-  if ((csize - asize) >= MIN_SIZE) {
+  if ((csize - asize) >= MIN_SIZE + DSIZE) {
     PUT(HEADER(bp), PACK(asize, 1));
     PUT(FOOTER(bp), PACK(asize, 1));
     bp = NEXT_BLKP(bp);
-    PUT(HEADER(bp), PACK(csize-asize, 0));
-    PUT(FOOTER(bp), PACK(csize-asize, 0));
+    PUT(HEADER(bp), PACK(csize - asize - DSIZE, 0));
+    PUT(FOOTER(bp), PACK(csize - asize - DSIZE, 0));
     freelist_add(bp);
   } else {
     PUT(HEADER(bp), PACK(csize, 1));

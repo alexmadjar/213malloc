@@ -35,6 +35,21 @@ INVARIANTS:   Things that should always be the case
 
 * There are never two free blocks in a row (ie: no deferred coalescing)
 * The structure starting with the 14 buckets, going through the trie and into the stacks contains ALL free nodes exactly once and contains no allocated nodes nor "garbage" pointers
+* Free blocks are in the appropriate bin
 * All sizes and pointers are 8 byte aligned
 * You should be able to crawl through the entire heap forward or backward at any time using the headers / footers
+
+In order to check the trie invariants, I have designed the following b-trie crawling test case:
+
+foreach bin:
+   foreach child (trie AND stack)
+      if child doesn't share first n-bits with parent: ERROR
+      // we use the allocated bit in the footer to store visits
+      // and the header to keep it free
+      if child is not free: ERROR
+      if visitted: ERROR
+      mark as visited
+foreach block:
+    if free & !visitted: ERROR
+    mark as unvisited
 

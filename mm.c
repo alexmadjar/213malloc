@@ -47,7 +47,7 @@ team_t team = {
 };
 
 // My Global Variable
-char* heap_listp;  // Pointer to the start of the implicit heap list
+char *heap_listp;  // Pointer to the start of the implicit heap list
 
 //  Turn debugging code on
 //     0 -> no debugging checks or output
@@ -60,13 +60,13 @@ char* heap_listp;  // Pointer to the start of the implicit heap list
 #define ALIGNMENT 8
 
 /* rounds up to the nearest multiple of ALIGNMENT 
-    NOTE: ALIGNMENT must be a multiple of two
+    NOTE: ALIGNMENT must be a power of two
  */
 #define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~(ALIGNMENT-1))
 
 /* Basic constants and types*/
 #ifndef NULL
-#define NULL ((void *)(0))
+#  define NULL ((void *)(0))
 #endif
 /* struct freenode
  *
@@ -90,19 +90,19 @@ struct freenode
 #define MIN_SIZE ((size_t)(ALIGN(sizeof(struct freenode))))
 #define MAX_SIZE ((size_t)((1<<18)-ALIGNMENT))
 #define BIT_OFFSET (__builtin_clzl(MAX_SIZE))
-#define LAST_BIT  (__builtin_clzl(ALIGNMENT))
+#define LSIG_BIT_OF_SIZE  (__builtin_clzl(ALIGNMENT))
 #define BIT_COUNT  (1 + (__builtin_clzl(MIN_SIZE)) - BIT_OFFSET)
 #define BINS_SIZE ((size_t)(BIT_COUNT * POINTER_SIZE))
 #define BIN_OFFSET ((size_t)(BINS_SIZE + WSIZE))
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))
 /* Pack a size and allocated bit into a word */
-#define PACK(size, alloc)  ((size) | (alloc))
+#define PACKALLOC(size, alloc)  ((size) | (alloc))
 /* Read and write a word at address p */
 #define GET(p)       (*(WTYPE *)(p))
 #define PUT(p, val)  (*(WTYPE *)(p) = ((WTYPE)(val)))
 /* Read the size and allocated fields from address p */
-#define GET_SIZE(p)  (GET(p) & ~0x7)
+#define GET_SIZE(p)  (GET(p) & ~(ALIGNMENT-1))
 #define IS_ALLOC(p) (GET(p) & 0x1)
 #define HEADER(bp) ((char *)(bp) - WSIZE)
 #define FOOTER(bp) ((char *)(bp) + GET_SIZE(HEADER(bp)))
@@ -151,10 +151,10 @@ int mm_init(void)
    }
    memset(heap_listp, 0, BINS_SIZE);
    heap_listp += BINS_SIZE;
-   PUT(heap_listp, PACK(0, 1)); /* Prologue header */
+   PUT(heap_listp, PACKALLOC(0, 1)); /* Prologue header */
    heap_listp += WSIZE;
-   PUT(heap_listp, PACK(0, 1)); /* Prologue footer */
-   PUT(heap_listp + WSIZE, PACK(0, 1)); /* Epilogue header */
+   PUT(heap_listp, PACKALLOC(0, 1)); /* Prologue footer */
+   PUT(heap_listp + WSIZE, PACKALLOC(0, 1)); /* Epilogue header */
 
    #if DEBUG
       if(check_defines()) {
@@ -186,11 +186,11 @@ static inline void *extend_heap(size_t bytes) {
   if ((long)(bp = mem_sbrk(DSIZE+size)) == -1)
       return NULL;
   /* Initialize free block header/footer and the epilogue header */
-  PUT(HEADER(bp), PACK(size, 0)); /* Free block header */
-  PUT(FOOTER(bp), PACK(size, 0)); /* Free block footer */
+  PUT(HEADER(bp), PACKALLOC(size, 0)); /* Free block header */
+  PUT(FOOTER(bp), PACKALLOC(size, 0)); /* Free block footer */
   // TODO: Understand how this doesn't seg fault
   //  I don't think it does cause it was in the starter code, but...
-  PUT(HEADER(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */
+  PUT(HEADER(NEXT_BLKP(bp)), PACKALLOC(0, 1)); /* New epilogue header */
 
   /* Coalesce if the previous block was free */
   return coalesce(bp);
@@ -201,8 +201,8 @@ void mm_free(void *bp){
   #if DEBUG>1
     fprintf(stderr, "Call to free with pointer %p (size: %lu)\n", bp, size);
   #endif
-  PUT(HEADER(bp),PACK(size, 0));
-  PUT(FOOTER(bp),PACK(size, 0)); 
+  PUT(HEADER(bp),PACKALLOC(size, 0));
+  PUT(FOOTER(bp),PACKALLOC(size, 0)); 
   coalesce(bp);
   #if DEBUG
     if (!mm_check()) {
@@ -230,8 +230,8 @@ static inline void *coalesce(void *bp)
     #endif
     freelist_remove(NEXT_BLKP(bp));
     size += DSIZE + GET_SIZE(HEADER(NEXT_BLKP(bp)));
-    PUT(HEADER(bp), PACK(size, 0));
-    PUT(FOOTER(bp), PACK(size, 0));
+    PUT(HEADER(bp), PACKALLOC(size, 0));
+    PUT(FOOTER(bp), PACKALLOC(size, 0));
   }
   else if (!prev_alloc && next_alloc) {
     #if DEBUG>1
@@ -239,8 +239,8 @@ static inline void *coalesce(void *bp)
     #endif
     freelist_remove(PREV_BLKP(bp));
     size += DSIZE + GET_SIZE(HEADER(PREV_BLKP(bp)));
-    PUT(FOOTER(bp), PACK(size, 0));
-    PUT(HEADER(PREV_BLKP(bp)), PACK(size, 0));
+    PUT(FOOTER(bp), PACKALLOC(size, 0));
+    PUT(HEADER(PREV_BLKP(bp)), PACKALLOC(size, 0));
     bp = PREV_BLKP(bp);
   }
   else {
@@ -251,8 +251,8 @@ static inline void *coalesce(void *bp)
     freelist_remove(NEXT_BLKP(bp));
     size += GET_SIZE(HEADER(PREV_BLKP(bp))) +
     GET_SIZE(FOOTER(NEXT_BLKP(bp))) + (DSIZE*2);
-    PUT(HEADER(PREV_BLKP(bp)), PACK(size, 0));
-    PUT(FOOTER(NEXT_BLKP(bp)), PACK(size, 0));
+    PUT(HEADER(PREV_BLKP(bp)), PACKALLOC(size, 0));
+    PUT(FOOTER(NEXT_BLKP(bp)), PACKALLOC(size, 0));
     bp = PREV_BLKP(bp);
   }
   bp = freelist_add(bp); 
@@ -320,15 +320,15 @@ static inline void place(void* bp, size_t asize) {
   size_t csize = GET_SIZE(HEADER(bp));
   freelist_remove(bp);
   if ((csize - asize) >= MIN_SIZE + DSIZE) {
-    PUT(HEADER(bp), PACK(asize, 1));
-    PUT(FOOTER(bp), PACK(asize, 1));
+    PUT(HEADER(bp), PACKALLOC(asize, 1));
+    PUT(FOOTER(bp), PACKALLOC(asize, 1));
     bp = NEXT_BLKP(bp);
-    PUT(HEADER(bp), PACK(csize - asize - DSIZE, 0));
-    PUT(FOOTER(bp), PACK(csize - asize - DSIZE, 0));
+    PUT(HEADER(bp), PACKALLOC(csize - asize - DSIZE, 0));
+    PUT(FOOTER(bp), PACKALLOC(csize - asize - DSIZE, 0));
     freelist_add(bp);
   } else {
-    PUT(HEADER(bp), PACK(csize, 1));
-    PUT(FOOTER(bp), PACK(csize, 1));
+    PUT(HEADER(bp), PACKALLOC(csize, 1));
+    PUT(FOOTER(bp), PACKALLOC(csize, 1));
   }
 }
 
@@ -449,7 +449,7 @@ static void *freelist_bestfit(size_t sz) {
   // try "bin" first
   while (bin) {
     #if DEBUG
-      if (bit > LAST_BIT) {
+      if (bit > LSIG_BIT_OF_SIZE) {
         fprintf(stderr, "!! bestfit went beyond normal trie depth!\n");
         break;
       }
@@ -505,7 +505,7 @@ int check_defines(void) {
     fprintf(stderr, "!!! NTYPE and BITNESS are whack!!\n");
     problems++;
   }
-  if (!BIT_N(MAX_SIZE,BIT_OFFSET) || BIT_N(MAX_SIZE,BIT_OFFSET-1) || BIT_N(MIN_SIZE,LAST_BIT+1) || !BIT_N(ALIGNMENT,LAST_BIT)) {
+  if (!BIT_N(MAX_SIZE,BIT_OFFSET) || BIT_N(MAX_SIZE,BIT_OFFSET-1) || BIT_N(MIN_SIZE,LSIG_BIT_OF_SIZE+1) || !BIT_N(ALIGNMENT,LSIG_BIT_OF_SIZE)) {
     fprintf(stderr, "!!! BIT_N is whack!!\n");
     problems++;
   }
@@ -527,7 +527,7 @@ int check_bins() {
     size_t b = BIN_FOR(s);
     BINP_AT(b) = (void *)(c++);
   }
-  struct freenode ** l = (mem_heap_lo() + WSIZE);
+  struct freenode **l = (mem_heap_lo() + WSIZE);
   for (c = 0; c < BIT_COUNT; c++) {
     if (l[c] != (void *)(c)) {
       fprintf(stderr, "!!! There's a serious bins problem!\n");
@@ -560,8 +560,8 @@ int mm_check(void) {
 }
 
 int ends_in_epilogue(void) {
-  void* ep = mem_heap_hi() + 1 - WSIZE;
-  if (GET(ep) != PACK(0,1)) {
+  void *ep = mem_heap_hi() + 1 - WSIZE;
+  if (GET(ep) != PACKALLOC(0,1)) {
     return 0;
   } else {
     return 1;

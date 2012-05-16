@@ -505,6 +505,10 @@ int check_defines(void) {
     fprintf(stderr, "!!! NTYPE and BITNESS are whack!!\n");
     problems++;
   }
+  if (!BIT_N(MAX_SIZE,BIT_OFFSET) || BIT_N(MAX_SIZE,BIT_OFFSET-1) || BIT_N(MIN_SIZE,LAST_BIT+1) || !BIT_N(ALIGNMENT,LAST_BIT)) {
+    fprintf(stderr, "!!! BIT_N is whack!!\n");
+    problems++;
+  }
   if (check_bins()) {
     fprintf(stderr, "!!! THE BINS is whack!!\n");
     problems++;
@@ -513,29 +517,19 @@ int check_defines(void) {
     fprintf(stderr, "!!! MAX is whack!!\n");
     problems++;
   }
-  if (GET_SIZE(PACK(12400,1)) != 12400) {
-    fprintf(stderr, "!!! PACK is whack!!\n");
-    problems++;
-  }
-  if (!IS_ALLOC(PACK(12400,1))) {
-    fprintf(stderr, "!!! IS_ALLOC is whack!!\n");
-    problems++;
-  }
-  if (!BIT_N(MAX_SIZE,BIT_OFFSET) || BIT_N(MAX_SIZE,BIT_OFFSET-1) || BIT_N(MIN_SIZE,LAST_BIT+1) || !BIT_N(ALIGNMENT,LAST_BIT)) {
-    fprintf(stderr, "!!! BIT_N is whack!!\n");
-    problems++;
-  }
+  return problems;
 }
 
 int check_bins() {
   int s;
-  int c = 0;
-  for(s = MAX_SIZE; s > MIN_SIZE; s = ALIGN(s >> 1)) {
-    BINP_AT(BIN_FOR(s)) = c++;
+  long unsigned c = 0;
+  for(s = MAX_SIZE; s > MIN_SIZE; s = s >> 1) {
+    size_t b = BIN_FOR(s);
+    BINP_AT(b) = (void *)(c++);
   }
   struct freenode ** l = (mem_heap_lo() + WSIZE);
   for (c = 0; c < BIT_COUNT; c++) {
-    if (l[c] != c) {
+    if (l[c] != (void *)(c)) {
       fprintf(stderr, "!!! There's a serious bins problem!\n");
       return 1;
     }

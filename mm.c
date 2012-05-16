@@ -21,6 +21,7 @@
  *  - inline keyword
  *  - which node in trie for bestfit
  *  - go left / right based on math vs logic
+ *  - no assert.h etc
  */
 
 #include <stdio.h>
@@ -143,7 +144,7 @@ int mm_init(void)
      PUT(heap_listp, 0); /* Alignment padding */
      heap_listp += WSIZE;
    }
-   memset(heap_listp, NULL, BINS_SIZE);
+   memset(heap_listp, 0, BINS_SIZE);
    heap_listp += BINS_SIZE;
    PUT(heap_listp, PACK(0, 1)); /* Prologue header */
    heap_listp += WSIZE;
@@ -169,7 +170,7 @@ static inline void *extend_heap(size_t bytes) {
     }
   #endif
   /* Allocate an even number of words to maintain alignment */
-  size = ALIGN(bytes)
+  size = ALIGN(bytes);
   if ((long)(bp = mem_sbrk(DSIZE+size)) == -1)
       return NULL;
   /* Initialize free block header/footer and the epilogue header */
@@ -263,12 +264,19 @@ void *mm_malloc(size_t size)
   /* Search the free list for a fit */
   if ((bp = find_fit(size)) != NULL) {
     place(bp, size);
-  }
-  #if DEBUG
-    if (!mm_check()) {
-      fprintf(stderr, "!!!!!!!!! mm_check failed !!!!!!!!!!\n");
-      return NULL;
+  } else {
+    extendsize = MAX(CHUNKSIZE,size);
+    if ((bp = extend_heap(extendsize)) != NULL) {
+      place(bp, size);
     }
+  #if DEBUG
+    else {
+      fprintf(stderr, "!!! MALLOC FAILED!!! !!!!\n");
+    }
+  }
+  if (!mm_check()) {
+    fprintf(stderr, "!!!!!!!!! mm_check failed !!!!!!!!!!\n");
+  }
   #endif
   return bp;
 }
@@ -286,7 +294,7 @@ static inline void *find_fit(size_t asize)
   /* No fit found. Get more memory and place the block */
   extendsize = MAX(asize,CHUNKSIZE);
   // TODO: Remove possible inefficiency of adding then immediately removing noew space
-  return extend_heap(extendsize)
+  return extend_heap(extendsize);
 }
 
 // actually allocate this block with size asize
@@ -438,7 +446,7 @@ static void *freelist_bestfit(size_t sz) {
       }
     }
     ++bit;
-    bin = NEXT_TNODE(*bin, BIT_N(sz,bit));
+    bin = NEXT_TNODE(bin, BIT_N(sz,bit));
   }
   if (bestfit) {
     return bestfit;

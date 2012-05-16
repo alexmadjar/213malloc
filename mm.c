@@ -20,6 +20,7 @@
 /*  Experiments to run:
  *  - inline keyword
  *  - which node in trie for bestfit
+ *  - go left / right based on math vs logic
  */
 
 #include <stdio.h>
@@ -74,18 +75,19 @@ char* heap_listp;  // Pointer to the start of the implicit heap list
 struct freenode 
 {
   struct freenode *next;  // next freenode of the same size (stack)
-  struct freenode *left;  // left b-trie child
-  struct freenode *right; // right b-trie child
+  // NOTE: left and right _must_ be in order and next to eachother
+  struct freenode *children[2]; 
   struct freenode **prev; // pointer to the _only_ pointer that points here
 };
 #define WSIZE       (4)       /* Word and header/footer size (bytes) */
 #define WTYPE       unsigned int  // type to use for word sized ints
+#define NTYPE       unsigned long
 #define DSIZE       (2*WSIZE)       /* Double word size (bytes) */
 #define CHUNKSIZE  (1<<12)  /* Extend heap by this amount (bytes) */
 #define POINTER_SIZE (sizeof(void *)) /* size of pointers */
-#define BITNESS  (8*sizeof(long unsigned int))
+#define BITNESS  (8*sizeof(NTYPE))
 #define MIN_SIZE ((size_t)(ALIGN(sizeof(struct freenode))))
-#define MAX_SIZE ((size_t)((1<<18)-1))
+#define MAX_SIZE ((size_t)((1<<18)-ALIGNMENT))
 #define BIT_OFFSET (__builtin_clzl(MAX_SIZE))
 #define BIT_COUNT  (1 + (__builtin_clzl(MIN_SIZE)) - BIT_OFFSET)
 #define BINS_SIZE ((size_t)(BIT_COUNT * POINTER_SIZE))
@@ -104,11 +106,7 @@ struct freenode
 #define FOOTER(bp) ((char *)(bp) + GET_SIZE(HEADER(bp)) - DSIZE)
 #define NEXT_BLKP(bp) ((char *)(bp) + DSIZE + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp) - DSIZE - GET_SIZE(((char *)(bp) - DSIZE)))
-// zero indexed from most significant bit bit-accessor for unsigned long 
-#define BIT_N(s,n) ((((long unsigned int)(s))>>((BITNESS - 1) - (n))) & ((long unsigned int)(1)))
-// Gets the bin number for a size: note larger sizes -> smaller bin number
-#define BIN_FOR(asize) ((__builtin_clzl(asize))-BIT_OFFSET)
-#define BINP_AT(n) ((struct freenode **)(((heap_listp)-BIN_OFFSET)+(n*POINTER_SIZE)))
+
 
 
 // Basic internal implicit list / heap operations
@@ -332,14 +330,89 @@ void *mm_realloc(void *ptr, size_t size)
 // freelist code
 ////////////////////
 
-// REWRITEN THROUGH HERE
+/* Note: No coalescing etc needs to happen here, nor checking of free bit
+ *
+ */
+
+// zero indexed from most significant bit bit-accessor for unsigned long 
+#define BIT_N(s,n) ((((NTYPE)(s))>>((BITNESS - 1) - (n))) & ((NTYPE)(1)))
+// Gets the bin number for a size: note larger sizes -> smaller bin number
+#define BIN_FOR(asize) ((__builtin_clzl(asize))-BIT_OFFSET)
+#define BINP_AT(n) (&(((struct freenode **)((heap_listp)-BIN_OFFSET))[n]))
+
+#define NEXT_TNODE(p,b) (&((p)->children[b]))
+
+static struct freenode * rmost(struct freenode * n, NTYPE r);
+
+static struct freenode * rmost(struct freenode * n, NTYPE r) {
+  if (n->children[r] == NULL) {
+    return NULL;
+  }
+  do {
+    n = n->children[r];
+  } while (n->children[r]);
+  return n;
+}
 
 static void *freelist_add(void *bp) {
-  
+  size_t asize = GET_SIZE(FOOTER(bp));
+  size_t bit = BIN_FOR(asize);
+  struct freenode ** bin = BINP_AT(bit); // bin has the address of the bin pointer
+  struct freenode * fn = (struct freenode *)bp;
+  while(1) {
+    if (*bin == NULL) {
+      *bin = fn;
+      fn->prev = bin;
+      fn->next = fn->children[0] = fn->children[1] = NULL;
+      return bp;
+    }
+    if (GET_SIZE(FOOTER(*bin)) == (WTYPE)(asize)) {
+      fn->prev = bin;
+      fn->next = *bin;
+      fn->children[0] = (*bin)->children[0];
+      (*bin)->children[0] = NULL;
+      fn->children[1] = (*bin)->children[1];
+      (*bin)->children[1] = NULL;
+      *bin = fn;
+      return bp;
+    }
+    bin = NEXT_TNODE(*bin, BIT_N(asize,++bit));
+    #if DEBUG
+      if (bit > 64) {
+        fprintf(stderr, "!! Infinite loop in freelist_add!\n");
+        return NULL;
+      }
+    #endif
+  }
 }
 
 static void freelist_remove(void *bp) {
-  
+  struct freenode * fn = (struct freenode *)bp;
+  // if part of LL
+  if (fn->next) {
+    fn->next->prev = fn->prev;
+    *(fn->prev) = fn->next;
+    fn->next->children[0] = fn->children[0];
+    fn->next->children[1] = fn->children[1];
+    return;
+  }
+  struct freenode * ance;
+  // else if part of trie
+  if (fn->children[0] != NULL) {
+    ance = rmost(fn,0);
+    *(ance->prev) = NULL;
+    ance->children[0] = fn->children[0];
+    ance->children[1] = fn->children[0];
+  } else {
+    // 0-most is definately NULL 
+    ance = rmost(fn,1);
+    if (ance) {
+      *(ance->prev) = NULL;
+      ance->children[0] = fn->children[0];
+      ance->children[1] = fn->children[0];
+    }
+  }
+  *(fn->prev) = ance;
 }
 
 static void *freelist_bestfit(size_t sz) {
@@ -358,7 +431,7 @@ int ends_in_epilogue(void);
 
 // returns 0 IFF problem
 int mm_check(void) {
-  if(! ends_in_epilogue()) {
+  if(!ends_in_epilogue()) {
     fprintf(stderr, "!! The heap doesn't end in an epilogue!\n");
     return 0;
   }

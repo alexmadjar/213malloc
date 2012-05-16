@@ -122,6 +122,7 @@ static inline void *find_fit(size_t asize);
 
 #if DEBUG
 int mm_check(void);
+int check_defines(void);
 #endif
 
 // explicit freelist functions
@@ -138,8 +139,12 @@ int mm_init(void)
       fprintf(stderr, "Initializing heap with %d bins\n", BIT_COUNT);
    #endif
    /* Create the initial empty heap */
-   if ((heap_listp = mem_sbrk((4*WSIZE) + BINS_SIZE)) == (void *)-1)
+   if ((heap_listp = mem_sbrk((4*WSIZE) + BINS_SIZE)) == (void *)-1) {
+    #if DEBUG
+       fprintf(stderr, "!! unable to sbrk the header!\n");
+    #endif
      return -1;
+   }
    if (ALIGN(BINS_SIZE) == BINS_SIZE) {
      PUT(heap_listp, 0); /* Alignment padding */
      heap_listp += WSIZE;
@@ -150,6 +155,13 @@ int mm_init(void)
    heap_listp += WSIZE;
    PUT(heap_listp, PACK(0, 1)); /* Prologue footer */
    PUT(heap_listp + WSIZE, PACK(0, 1)); /* Epilogue header */
+
+   #if DEBUG
+      if(check_defines()) {
+        fprintf(stderr, "!!  DEFINES are wack!\n");
+        return -1;
+      }
+   #endif
   
    /* Extend the empty heap with a free block of CHUNKSIZE bytes */
   if (extend_heap(CHUNKSIZE) == NULL)
@@ -243,7 +255,13 @@ static inline void *coalesce(void *bp)
     PUT(FOOTER(NEXT_BLKP(bp)), PACK(size, 0));
     bp = PREV_BLKP(bp);
   }
-  return freelist_add(bp); 
+  bp = freelist_add(bp); 
+  #if DEBUG
+    if (!mm_check()) {
+      fprintf(stderr, "!!!!!!!!!mm_check failed!!!!!!!!\n");
+    }
+  #endif
+  return bp;
 }
 
 void *mm_malloc(size_t size)
@@ -466,6 +484,65 @@ static void *freelist_bestfit(size_t sz) {
 // DEBUG ONLY CODE
 //////////////////
 #if DEBUG
+
+int check_bins();
+
+int check_defines(void) {
+  int problems = 0;
+  if(ALIGN(ALIGNMENT*3 - 1) != ALIGNMENT*3) {
+    fprintf(stderr, "!!ALIGN is whack!!\n");
+    problems++;
+  }
+  if (sizeof(WTYPE) != WSIZE) {
+    fprintf(stderr, "!!! WTYPE is whack!!\n");
+    problems++;
+  }
+  if (ALIGN(CHUNKSIZE) != CHUNKSIZE) {
+    fprintf(stderr, "!!! CHUNKSIZE is whack!!\n");
+    problems++;
+  }
+  if (sizeof(NTYPE) != sizeof(void *)) {
+    fprintf(stderr, "!!! NTYPE and BITNESS are whack!!\n");
+    problems++;
+  }
+  if (check_bins()) {
+    fprintf(stderr, "!!! THE BINS is whack!!\n");
+    problems++;
+  }
+  if (MAX(2,1) != 2 || MAX(1,2) != 2) {
+    fprintf(stderr, "!!! MAX is whack!!\n");
+    problems++;
+  }
+  if (GET_SIZE(PACK(12400,1)) != 12400) {
+    fprintf(stderr, "!!! PACK is whack!!\n");
+    problems++;
+  }
+  if (!IS_ALLOC(PACK(12400,1))) {
+    fprintf(stderr, "!!! IS_ALLOC is whack!!\n");
+    problems++;
+  }
+  if (!BIT_N(MAX_SIZE,BIT_OFFSET) || BIT_N(MAX_SIZE,BIT_OFFSET-1) || BIT_N(MIN_SIZE,LAST_BIT+1) || !BIT_N(ALIGNMENT,LAST_BIT)) {
+    fprintf(stderr, "!!! BIT_N is whack!!\n");
+    problems++;
+  }
+}
+
+int check_bins() {
+  int s;
+  int c = 0;
+  for(s = MAX_SIZE; s > MIN_SIZE; s = ALIGN(s >> 1)) {
+    BINP_AT(BIN_FOR(s)) = c++;
+  }
+  struct freenode ** l = (mem_heap_lo() + WSIZE);
+  for (c = 0; c < BIT_COUNT; c++) {
+    if (l[c] != c) {
+      fprintf(stderr, "!!! There's a serious bins problem!\n");
+      return 1;
+    }
+  }
+  memset(l, 0, BINS_SIZE);
+  return 0;
+}
 
 int uncoalesced(void);
 int inconsistant_footer(void);

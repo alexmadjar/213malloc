@@ -89,6 +89,7 @@ struct freenode
 #define MIN_SIZE ((size_t)(ALIGN(sizeof(struct freenode))))
 #define MAX_SIZE ((size_t)((1<<18)-ALIGNMENT))
 #define BIT_OFFSET (__builtin_clzl(MAX_SIZE))
+#define LAST_BIT  (__builtin_clzl(ALIGNMENT))
 #define BIT_COUNT  (1 + (__builtin_clzl(MIN_SIZE)) - BIT_OFFSET)
 #define BINS_SIZE ((size_t)(BIT_COUNT * POINTER_SIZE))
 #define BIN_OFFSET ((size_t)(BINS_SIZE + WSIZE))
@@ -338,9 +339,9 @@ void *mm_realloc(void *ptr, size_t size)
 #define BIT_N(s,n) ((((NTYPE)(s))>>((BITNESS - 1) - (n))) & ((NTYPE)(1)))
 // Gets the bin number for a size: note larger sizes -> smaller bin number
 #define BIN_FOR(asize) ((__builtin_clzl(asize))-BIT_OFFSET)
-#define BINP_AT(n) (&(((struct freenode **)((heap_listp)-BIN_OFFSET))[n]))
+#define BINP_AT(n) (((struct freenode **)((heap_listp)-BIN_OFFSET))[n])
 
-#define NEXT_TNODE(p,b) (&((p)->children[b]))
+#define NEXT_TNODE(p,b) ((p)->children[b])
 
 static struct freenode * rmost(struct freenode * n, NTYPE r);
 
@@ -357,7 +358,7 @@ static struct freenode * rmost(struct freenode * n, NTYPE r) {
 static void *freelist_add(void *bp) {
   size_t asize = GET_SIZE(FOOTER(bp));
   size_t bit = BIN_FOR(asize);
-  struct freenode ** bin = BINP_AT(bit); // bin has the address of the bin pointer
+  struct freenode ** bin = &BINP_AT(bit); // bin has the address of the bin pointer
   struct freenode * fn = (struct freenode *)bp;
   while(1) {
     if (*bin == NULL) {
@@ -376,7 +377,7 @@ static void *freelist_add(void *bp) {
       *bin = fn;
       return bp;
     }
-    bin = NEXT_TNODE(*bin, BIT_N(asize,++bit));
+    bin = &(NEXT_TNODE(*bin, BIT_N(asize,++bit)));
     #if DEBUG
       if (bit > 64) {
         fprintf(stderr, "!! Infinite loop in freelist_add!\n");
@@ -416,7 +417,40 @@ static void freelist_remove(void *bp) {
 }
 
 static void *freelist_bestfit(size_t sz) {
-  
+  struct freenode * bestfit = NULL;
+  size_t bit = BIN_FOR(sz);
+  struct freenode * bin = BINP_AT(bit); // bin has the address of the bin pointer
+  // try "bin" first
+  while (bin) {
+    #if DEBUG
+      if (bit > LAST_BIT) {
+        fprintf(stderr, "!! bestfit went beyond normal trie depth!\n");
+        break;
+      }
+    #endif
+    size_t s = GET_SIZE(FOOTER(bin));
+    if (s == sz) {
+      return bin;
+    }
+    if (s > sz) {
+      if ((bestfit == NULL) || ((WTYPE)(s) < GET_SIZE(FOOTER(bestfit)))) {
+        bestfit = bin;
+      }
+    }
+    ++bit;
+    bin = NEXT_TNODE(*bin, BIT_N(sz,bit));
+  }
+  if (bestfit) {
+    return bestfit;
+  }
+  // if that doesn't work find anything larger
+  for (bit = BIN_FOR(sz)-1; bit >= 0; bit--) {
+    bin = BINP_AT(bit);
+    if (bin) {
+      return bin;
+    }
+  }
+  return NULL;
 }
 
 
@@ -486,18 +520,5 @@ int inconsistant_footer(void) {
 
 // END DEBUG CODE
 #endif
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 

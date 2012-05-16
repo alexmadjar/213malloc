@@ -105,7 +105,7 @@ struct freenode
 #define GET_SIZE(p)  (GET(p) & ~0x7)
 #define IS_ALLOC(p) (GET(p) & 0x1)
 #define HEADER(bp) ((char *)(bp) - WSIZE)
-#define FOOTER(bp) ((char *)(bp) + GET_SIZE(HEADER(bp)) - DSIZE)
+#define FOOTER(bp) ((char *)(bp) + GET_SIZE(HEADER(bp)))
 #define NEXT_BLKP(bp) ((char *)(bp) + DSIZE + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp) - DSIZE - GET_SIZE(((char *)(bp) - DSIZE)))
 
@@ -135,7 +135,7 @@ static void *freelist_bestfit(size_t sz);
 int mm_init(void)
 {
    #if DEBUG>1
-      fprintf(stderr, "Initializing heap with %lu BINS_SIZE\n", BINS_SIZE);
+      fprintf(stderr, "Initializing heap with %d bins\n", BIT_COUNT);
    #endif
    /* Create the initial empty heap */
    if ((heap_listp = mem_sbrk((4*WSIZE) + BINS_SIZE)) == (void *)-1)

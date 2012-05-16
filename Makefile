@@ -6,7 +6,7 @@ VERSION = `date +%Y%m%d%H%M%S`
 PROJ = malloclab
 
 CC = gcc
-CFLAGS = -Wall -O2
+CFLAGS = -Wall -O2 -ggdb
 
 DELIVERY = mm.c
 

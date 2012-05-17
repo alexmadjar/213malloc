@@ -122,8 +122,6 @@ static inline void *coalesce(void *bp); /* merge newly free block with neighbors
                                              and add to freelist */
 /* allocate asize at bp (possibly spliting) and remove from freelist */
 static inline void place(void* bp, size_t asize); 
-/* finds best fit in the free list or allocates new space if not */
-static inline void *find_fit(size_t asize);
 
 #if DEBUG
 int mm_check(void);
@@ -196,10 +194,8 @@ static inline void *extend_heap(size_t bytes) {
   HEADER(bp) = PACK(size, 0); /* Free block header */
   FOOTER(bp) = PACK(size, 0); /* Free block footer */
   HEADER(NEXT_BLKP(bp)) = PACK(0, 1); /* New epilogue header */
-
-  /* Coalesce if the previous block was free */
-  // TODO Optimize by not adding to the freelist just to remove it
-  return coalesce(bp);
+  // TODO: Not coellescing here could fragment space a bit
+  return bp;
 }
 
 void mm_free(void *bp){
@@ -271,14 +267,12 @@ static inline void *coalesce(void *bp)
   #endif
   return bp;
 }
-// rewritten through here
 
 void *mm_malloc(size_t size)
 {
   #if DEBUG>1
     fprintf(stderr, "+malloc called with size=%lu\n", size);
   #endif
-  size_t extendsize;
   char *bp;
   // Ignore spurious requests
   if (size == 0)
@@ -289,11 +283,14 @@ void *mm_malloc(size_t size)
   else
     size = ALIGN(size);
   /* Search the free list for a fit */
-  if ((bp = find_fit(size)) != NULL) {
+  if ((bp = freelist_bestfit(size)) != NULL) {
+    freelist_remove(bp);
     place(bp, size);
   } else {
-    extendsize = MAX(CHUNKSIZE,size);
-    if ((bp = extend_heap(extendsize)) != NULL) {
+    // TODO: play with this
+    // size_t extendsize;
+    // extendsize = MAX(CHUNKSIZE,size);
+    if ((bp = extend_heap(size)) != NULL) {
       place(bp, size);
     }
   #if DEBUG
@@ -308,45 +305,33 @@ void *mm_malloc(size_t size)
   return bp;
 }
 
-// finds best fit or allocates new space if needed
-// NOTE: asize is pre-aligned
-static inline void *find_fit(size_t asize)
-{
-  size_t extendsize;
-  void *bp;
-  if ((bp = freelist_bestfit(asize)) != NULL) {
-    return bp;
-  }
-
-  /* No fit found. Get more memory and place the block */
-  extendsize = MAX(asize,CHUNKSIZE);
-  // TODO: Remove possible inefficiency of adding then immediately removing noew space
-  return extend_heap(extendsize);
-}
-
 // actually allocate this block with size asize
 static inline void place(void* bp, size_t asize) {
   size_t csize = GET_SIZE(bp);
-  freelist_remove(bp);
   if ((csize - asize) >= MIN_SIZE + DSIZE) {
-    PUT(HEADER(bp), PACK(asize, 1));
-    PUT(FOOTER(bp), PACK(asize, 1));
+    HEADER(bp) = PACK(asize, 1);
+    FOOTER(bp) = PACK(asize, 1);
     bp = NEXT_BLKP(bp);
-    PUT(HEADER(bp), PACK(csize - asize - DSIZE, 0));
-    PUT(FOOTER(bp), PACK(csize - asize - DSIZE, 0));
+    csize = csize - asize - DSIZE;
+    HEADER(bp) = PACK(csize, 0);
+    FOOTER(bp) = PACK(csize, 0);
     freelist_add(bp);
   } else {
-    PUT(HEADER(bp), PACK(csize, 1));
-    PUT(FOOTER(bp), PACK(csize, 1));
+    HEADER(bp) = PACK(csize, 1);
+    FOOTER(bp) = PACK(csize, 1);
   }
 }
 
 /*
  * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
  * HINT: this will always work, so save making this more efficient for later
+ * TODO: More efficient version
  */
 void *mm_realloc(void *ptr, size_t size)
 {
+    #if DEBUG>1
+      fprintf(stderr, "reallocing block %p (size %lu) with new size %lu\n", ptr, GET_SIZE(ptr), size);
+    #endif
     void *oldptr = ptr;
     void *newptr;
     size_t copySize;
@@ -371,11 +356,9 @@ void *mm_realloc(void *ptr, size_t size)
  */
 
 // zero indexed from most significant bit bit-accessor for unsigned long 
-#define BIT_N(s,n) ((((NTYPE)(s))>>((BITNESS - 1) - (n))) & ((NTYPE)(1)))
+#define BIT_N(s,n) ((((size_t)(s))>>((BITNESS - 1) - (n))) & ((size_t)(1)))
 // Gets the bin number for a size: note larger sizes -> smaller bin number
 #define BIN_FOR(asize) ((__builtin_clzl(asize))-BIT_OFFSET)
-
-#define NEXT_TNODE(p,b) ((p)->children[b])
 
 static struct freenode_t * rmost(struct freenode_t * n, NTYPE r);
 
@@ -392,7 +375,7 @@ static struct freenode_t * rmost(struct freenode_t * n, NTYPE r) {
 static void *freelist_add(void *bp) {
   size_t asize = GET_SIZE(bp);
   size_t bit = BIN_FOR(asize);
-  struct freenode_t ** bin = &BINP_AT(bit); // bin has the address of the bin pointer
+  struct freenode_t ** bin = &(heap->bins[bit]); // bin has the address of the bin pointer
   struct freenode_t * fn = (struct freenode_t *)bp;
   while(1) {
     if (*bin == NULL) {
@@ -401,7 +384,7 @@ static void *freelist_add(void *bp) {
       fn->next = fn->children[0] = fn->children[1] = NULL;
       return bp;
     }
-    if (GET_SIZE(*bin) == (WTYPE)(asize)) {
+    if (GET_SIZE(*bin) == asize) {
       fn->prev = bin;
       fn->next = *bin;
       fn->children[0] = (*bin)->children[0];
@@ -411,7 +394,7 @@ static void *freelist_add(void *bp) {
       *bin = fn;
       return bp;
     }
-    bin = &(NEXT_TNODE(*bin, BIT_N(asize,++bit)));
+    bin = &((*bin)->children[BIT_N(asize,++bit)])
     #if DEBUG
       if (bit > 64) {
         fprintf(stderr, "!! Infinite loop in freelist_add!\n");
@@ -431,29 +414,29 @@ static void freelist_remove(void *bp) {
     fn->next->children[1] = fn->children[1];
     return;
   }
-  struct freenode_t * ance;
+  struct freenode_t * ancestor;
   // else if part of trie
   if (fn->children[0] != NULL) {
-    ance = rmost(fn,0);
-    *(ance->prev) = NULL;
-    ance->children[0] = fn->children[0];
-    ance->children[1] = fn->children[0];
+    ancestor = rmost(fn,0);
+    *(ancestor->prev) = NULL;
+    ancestor->children[0] = fn->children[0];
+    ancestor->children[1] = fn->children[1];
   } else {
     // 0-most is definately NULL 
-    ance = rmost(fn,1);
-    if (ance) {
-      *(ance->prev) = NULL;
-      ance->children[0] = fn->children[0];
-      ance->children[1] = fn->children[0];
+    ancestor = rmost(fn,1);
+    if (ancestor != NULL) {
+      *(ancestor->prev) = NULL;
+      ancestor->children[0] = fn->children[0];
+      ancestor->children[1] = fn->children[1];
     }
   }
-  *(fn->prev) = ance;
+  *(fn->prev) = ancestor;
 }
 
 static void *freelist_bestfit(size_t sz) {
   struct freenode_t * bestfit = NULL;
   size_t bit = BIN_FOR(sz);
-  struct freenode_t * bin = BINP_AT(bit); // bin has the address of the bin pointer
+  struct freenode_t * bin = heap->bins[bit]; // bin has the address of the bin pointer
   // try "bin" first
   while (bin) {
     #if DEBUG
@@ -467,20 +450,20 @@ static void *freelist_bestfit(size_t sz) {
       return bin;
     }
     if (s > sz) {
-      if ((bestfit == NULL) || ((WTYPE)(s) < GET_SIZE(bestfit))) {
+      if ((bestfit == NULL) || (s < GET_SIZE(bestfit))) {
         bestfit = bin;
       }
     }
     ++bit;
-    bin = NEXT_TNODE(bin, BIT_N(sz,bit));
+    bin = bin->children[BIT_N(sz,bit)];
   }
-  if (bestfit) {
+  if (bestfit != NULL) {
     return bestfit;
   }
   // if that doesn't work find anything larger
   for (bit = BIN_FOR(sz)-1; bit >= 0; bit--) {
-    bin = BINP_AT(bit);
-    if (bin) {
+    bin = heap->bins[bit];
+    if (bin != NULL) {
       return bin;
     }
   }

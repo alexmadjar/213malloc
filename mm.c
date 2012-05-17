@@ -9,7 +9,9 @@
  * 
  * Important notes about this implementation:
  *    - There is no error checking without debug turned on
- *    - "int" is assumed to be 1 word
+ *    - Should work on a wide array of machines (32/64 bit, embedded etc)
+ *      because I tried to avoid type size assumptions. 
+ *      This goal is however NOT THOROUGHLY TESTED and shouldn't be blindly relied on
  *  
  * For a more complete description, see the comment at the end of the file.
  *
@@ -22,6 +24,7 @@
  *  - which node in trie for bestfit
  *  - go left / right based on math vs logic
  *  - no assert.h etc
+ *  - extend heap right away
  */
 
 #include <stdio.h>
@@ -46,9 +49,6 @@ team_t team = {
     ""
 };
 
-// My Global Variable
-char *heap_listp;  // Pointer to the start of the implicit heap list
-
 //  Turn debugging code on
 //     0 -> no debugging checks or output
 //     1 -> low level checks
@@ -68,46 +68,51 @@ char *heap_listp;  // Pointer to the start of the implicit heap list
 #ifndef NULL
 #  define NULL ((void *)(0))
 #endif
-/* struct freenode
+/* struct freenode_t
  *
  * This is the structure _inside_ the freespace (doesn't include header/footer)
  *
  */
-struct freenode 
+struct freenode_t 
 {
-  struct freenode *next;  // next freenode of the same size (stack)
+  struct freenode_t *next;  // next freenode_t of the same size (stack)
   // NOTE: left and right _must_ be in order and next to eachother
-  struct freenode *children[2]; 
-  struct freenode **prev; // pointer to the _only_ pointer that points here
+  struct freenode_t *children[2]; 
+  struct freenode_t **prev; // pointer to the _only_ pointer that points here
 };
-#define WSIZE       (4)       /* Word and header/footer size (bytes) */
-#define WTYPE       unsigned int  // type to use for word sized ints
-#define NTYPE       unsigned long
-#define DSIZE       (2*WSIZE)       /* Double word size (bytes) */
-#define CHUNKSIZE  (1<<12)  /* Extend heap by this amount (bytes) */
 #define POINTER_SIZE (sizeof(void *)) /* size of pointers */
-#define BITNESS  (8*sizeof(NTYPE))
-#define MIN_SIZE ((size_t)(ALIGN(sizeof(struct freenode))))
+#define WSIZE (sizeof(size_t))
+#define DSIZE (2*(WSIZE))
+#define BITNESS  (8*POINTER_SIZE)
+#define MIN_SIZE ((size_t)(ALIGN(sizeof(struct freenode_t))))
 #define MAX_SIZE ((size_t)((1<<18)-ALIGNMENT))
 #define BIT_OFFSET (__builtin_clzl(MAX_SIZE))
 #define LSIG_BIT_OF_SIZE  (__builtin_clzl(ALIGNMENT))
 #define BIT_COUNT  (1 + (__builtin_clzl(MIN_SIZE)) - BIT_OFFSET)
-#define BINS_SIZE ((size_t)(BIT_COUNT * POINTER_SIZE))
-#define BIN_OFFSET ((size_t)(BINS_SIZE + WSIZE))
+
+struct heaphead_t
+{
+  struct freenode_t *bins[BIT_COUNT];
+  size_t prologue[2];
+  size_t head[1];
+}
+
+// Our global heap pointer
+struct heaphead_t * heap;
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))
 /* Pack a size and allocated bit into a word */
-#define PACKALLOC(size, alloc)  ((size) | (alloc))
-/* Read and write a word at address p */
-#define GET(p)       (*(WTYPE *)(p))
-#define PUT(p, val)  (*(WTYPE *)(p) = ((WTYPE)(val)))
+#define PACK(size, alloc)  ((size) | (alloc))
 /* Read the size and allocated fields from address p */
-#define GET_SIZE(p)  (GET(p) & ~(ALIGNMENT-1))
-#define IS_ALLOC(p) (GET(p) & 0x1)
-#define HEADER(bp) ((char *)(bp) - WSIZE)
-#define FOOTER(bp) ((char *)(bp) + GET_SIZE(HEADER(bp)))
-#define NEXT_BLKP(bp) ((char *)(bp) + DSIZE + GET_SIZE(((char *)(bp) - WSIZE)))
-#define PREV_BLKP(bp) ((char *)(bp) - DSIZE - GET_SIZE(((char *)(bp) - DSIZE)))
+#define PACK_SIZE(packed)  ((packed) & ~(ALIGNMENT-1))
+#define PACK_IS_ALLOC(packed) ((packed) & 0x1)
+#define HEADER(bp) ((size_t *)(bp)[-1])
+#define PREV_FOOTER(bp) ((size_t *)(bp)[-2])
+#define GET_SIZE(p)  PACK_SIZE(HEADER(p))
+#define IS_ALLOC(p)  PACK_IS_ALLOC(HEADER(p))
+#define FOOTER(bp) ((char *)(bp) + GET_SIZE(bp))
+#define NEXT_BLKP(bp) ((char *)(bp) + DSIZE + GET_SIZE(bp))
+#define PREV_BLKP(bp) ((char *)(bp) - DSIZE - PACK_SIZE(PREV_FOOTER(bp)))
 
 
 
@@ -130,6 +135,8 @@ static void *freelist_add(void *bp);
 static void freelist_remove(void *bp);
 static void *freelist_bestfit(size_t sz);
 
+// redone through here
+
 /* 
  * mm_init - initialize the malloc package.
  */
@@ -138,23 +145,20 @@ int mm_init(void)
    #if DEBUG>1
       fprintf(stderr, "Initializing heap with %d bins\n", BIT_COUNT);
    #endif
+   char * space;
    /* Create the initial empty heap */
-   if ((heap_listp = mem_sbrk((4*WSIZE) + BINS_SIZE)) == (void *)-1) {
+   if ((space = mem_sbrk(ALIGN(sizeof(heaphead_t))) == (void *)-1) {
     #if DEBUG
        fprintf(stderr, "!! unable to sbrk the header!\n");
     #endif
      return -1;
    }
-   if (ALIGN(BINS_SIZE) == BINS_SIZE) {
-     PUT(heap_listp, 0); /* Alignment padding */
-     heap_listp += WSIZE;
+   heap = space + ALIGN(sizeof(heaphead_t)) - sizeof(heaphead_t);
+   int a;
+   for (a = 0; a < BIT_COUNT; a++) {
+     heap->bins[a] = NULL;
    }
-   memset(heap_listp, 0, BINS_SIZE);
-   heap_listp += BINS_SIZE;
-   PUT(heap_listp, PACKALLOC(0, 1)); /* Prologue header */
-   heap_listp += WSIZE;
-   PUT(heap_listp, PACKALLOC(0, 1)); /* Prologue footer */
-   PUT(heap_listp + WSIZE, PACKALLOC(0, 1)); /* Epilogue header */
+   heap->head[0] = heap->prologue[0] = heap->prologue[1] = PACK(0,1)
 
    #if DEBUG
       if(check_defines()) {
@@ -164,10 +168,13 @@ int mm_init(void)
    #endif
   
    /* Extend the empty heap with a free block of CHUNKSIZE bytes */
-  if (extend_heap(CHUNKSIZE) == NULL)
-    return -1;
+ // if (extend_heap(CHUNKSIZE) == NULL)
+ //   return -1;
   return 0;
 }
+
+
+// rewritten through here
 
 static inline void *extend_heap(size_t bytes) {
   #if DEBUG>1
@@ -186,23 +193,22 @@ static inline void *extend_heap(size_t bytes) {
   if ((long)(bp = mem_sbrk(DSIZE+size)) == -1)
       return NULL;
   /* Initialize free block header/footer and the epilogue header */
-  PUT(HEADER(bp), PACKALLOC(size, 0)); /* Free block header */
-  PUT(FOOTER(bp), PACKALLOC(size, 0)); /* Free block footer */
-  // TODO: Understand how this doesn't seg fault
-  //  I don't think it does cause it was in the starter code, but...
-  PUT(HEADER(NEXT_BLKP(bp)), PACKALLOC(0, 1)); /* New epilogue header */
+  HEADER(bp) = PACK(size, 0); /* Free block header */
+  FOOTER(bp) = PACK(size, 0); /* Free block footer */
+  HEADER(NEXT_BLKP(bp)) = PACK(0, 1); /* New epilogue header */
 
   /* Coalesce if the previous block was free */
+  // TODO Optimize by not adding to the freelist just to remove it
   return coalesce(bp);
 }
 
 void mm_free(void *bp){
-  size_t size = GET_SIZE(HEADER(bp));
+  size_t size = GET_SIZE(bp);
   #if DEBUG>1
     fprintf(stderr, "Call to free with pointer %p (size: %lu)\n", bp, size);
   #endif
-  PUT(HEADER(bp),PACKALLOC(size, 0));
-  PUT(FOOTER(bp),PACKALLOC(size, 0)); 
+  HEADER(bp) = PACK(size, 0);
+  FOOTER(bp) = PACK(size, 0); 
   coalesce(bp);
   #if DEBUG
     if (!mm_check()) {
@@ -211,6 +217,7 @@ void mm_free(void *bp){
   #endif
 }
 
+
 // coalesce takes a pointer to a block
 // that is NOT in the free list
 // tries to merge it with its neighbors
@@ -218,9 +225,10 @@ void mm_free(void *bp){
 // returning a pointer to that newly added block
 static inline void *coalesce(void *bp)
 {
-  WTYPE prev_alloc = IS_ALLOC(FOOTER(PREV_BLKP(bp)));
-  WTYPE next_alloc = IS_ALLOC(HEADER(NEXT_BLKP(bp)));
-  size_t size = GET_SIZE(HEADER(bp));
+  void *next = NEXT_BLKP(bp);
+  WTYPE prev_alloc = PACK_IS_ALLOC(PREV_FOOTER(bp));
+  WTYPE next_alloc = IS_ALLOC(next);
+  size_t size = GET_SIZE(bp);
   if (prev_alloc && next_alloc) {
     // no op
   }
@@ -228,32 +236,32 @@ static inline void *coalesce(void *bp)
     #if DEBUG>1
       fprintf(stderr, "Coalescing %p with next block\n", bp);
     #endif
-    freelist_remove(NEXT_BLKP(bp));
-    size += DSIZE + GET_SIZE(HEADER(NEXT_BLKP(bp)));
-    PUT(HEADER(bp), PACKALLOC(size, 0));
-    PUT(FOOTER(bp), PACKALLOC(size, 0));
+    freelist_remove(next);
+    size += DSIZE + GET_SIZE(next);
+    HEADER(bp) = PACK(size, 0);
+    FOOTER(bp) = PACK(size, 0);
   }
   else if (!prev_alloc && next_alloc) {
     #if DEBUG>1
       fprintf(stderr, "Coalescing %p with previous block\n", bp);
     #endif
     freelist_remove(PREV_BLKP(bp));
-    size += DSIZE + GET_SIZE(HEADER(PREV_BLKP(bp)));
-    PUT(FOOTER(bp), PACKALLOC(size, 0));
-    PUT(HEADER(PREV_BLKP(bp)), PACKALLOC(size, 0));
+    size += DSIZE + PACK_SIZE(PREV_FOOTER(bp));
+    FOOTER(bp) = PACK(size, 0);
     bp = PREV_BLKP(bp);
+    HEADER(bp) = PACK(size, 0);
   }
   else {
     #if DEBUG>1
       fprintf(stderr, "Coalescing %p with neighboring blocks\n", bp);
     #endif
-    freelist_remove(PREV_BLKP(bp));
-    freelist_remove(NEXT_BLKP(bp));
-    size += GET_SIZE(HEADER(PREV_BLKP(bp))) +
-    GET_SIZE(FOOTER(NEXT_BLKP(bp))) + (DSIZE*2);
-    PUT(HEADER(PREV_BLKP(bp)), PACKALLOC(size, 0));
-    PUT(FOOTER(NEXT_BLKP(bp)), PACKALLOC(size, 0));
     bp = PREV_BLKP(bp);
+    freelist_remove(bp);
+    freelist_remove(next);
+    size += GET_SIZE(bp) +
+    GET_SIZE(next) + (DSIZE*2);
+    HEADER(bp) = PACK(size, 0);
+    FOOTER(next) = PACK(size, 0);
   }
   bp = freelist_add(bp); 
   #if DEBUG
@@ -263,6 +271,7 @@ static inline void *coalesce(void *bp)
   #endif
   return bp;
 }
+// rewritten through here
 
 void *mm_malloc(size_t size)
 {
@@ -317,18 +326,18 @@ static inline void *find_fit(size_t asize)
 
 // actually allocate this block with size asize
 static inline void place(void* bp, size_t asize) {
-  size_t csize = GET_SIZE(HEADER(bp));
+  size_t csize = GET_SIZE(bp);
   freelist_remove(bp);
   if ((csize - asize) >= MIN_SIZE + DSIZE) {
-    PUT(HEADER(bp), PACKALLOC(asize, 1));
-    PUT(FOOTER(bp), PACKALLOC(asize, 1));
+    PUT(HEADER(bp), PACK(asize, 1));
+    PUT(FOOTER(bp), PACK(asize, 1));
     bp = NEXT_BLKP(bp);
-    PUT(HEADER(bp), PACKALLOC(csize - asize - DSIZE, 0));
-    PUT(FOOTER(bp), PACKALLOC(csize - asize - DSIZE, 0));
+    PUT(HEADER(bp), PACK(csize - asize - DSIZE, 0));
+    PUT(FOOTER(bp), PACK(csize - asize - DSIZE, 0));
     freelist_add(bp);
   } else {
-    PUT(HEADER(bp), PACKALLOC(csize, 1));
-    PUT(FOOTER(bp), PACKALLOC(csize, 1));
+    PUT(HEADER(bp), PACK(csize, 1));
+    PUT(FOOTER(bp), PACK(csize, 1));
   }
 }
 
@@ -365,13 +374,12 @@ void *mm_realloc(void *ptr, size_t size)
 #define BIT_N(s,n) ((((NTYPE)(s))>>((BITNESS - 1) - (n))) & ((NTYPE)(1)))
 // Gets the bin number for a size: note larger sizes -> smaller bin number
 #define BIN_FOR(asize) ((__builtin_clzl(asize))-BIT_OFFSET)
-#define BINP_AT(n) (((struct freenode **)((heap_listp)-BIN_OFFSET))[n])
 
 #define NEXT_TNODE(p,b) ((p)->children[b])
 
-static struct freenode * rmost(struct freenode * n, NTYPE r);
+static struct freenode_t * rmost(struct freenode_t * n, NTYPE r);
 
-static struct freenode * rmost(struct freenode * n, NTYPE r) {
+static struct freenode_t * rmost(struct freenode_t * n, NTYPE r) {
   if (n->children[r] == NULL) {
     return NULL;
   }
@@ -382,10 +390,10 @@ static struct freenode * rmost(struct freenode * n, NTYPE r) {
 }
 
 static void *freelist_add(void *bp) {
-  size_t asize = GET_SIZE(FOOTER(bp));
+  size_t asize = GET_SIZE(bp);
   size_t bit = BIN_FOR(asize);
-  struct freenode ** bin = &BINP_AT(bit); // bin has the address of the bin pointer
-  struct freenode * fn = (struct freenode *)bp;
+  struct freenode_t ** bin = &BINP_AT(bit); // bin has the address of the bin pointer
+  struct freenode_t * fn = (struct freenode_t *)bp;
   while(1) {
     if (*bin == NULL) {
       *bin = fn;
@@ -393,7 +401,7 @@ static void *freelist_add(void *bp) {
       fn->next = fn->children[0] = fn->children[1] = NULL;
       return bp;
     }
-    if (GET_SIZE(FOOTER(*bin)) == (WTYPE)(asize)) {
+    if (GET_SIZE(*bin) == (WTYPE)(asize)) {
       fn->prev = bin;
       fn->next = *bin;
       fn->children[0] = (*bin)->children[0];
@@ -414,7 +422,7 @@ static void *freelist_add(void *bp) {
 }
 
 static void freelist_remove(void *bp) {
-  struct freenode * fn = (struct freenode *)bp;
+  struct freenode_t * fn = (struct freenode_t *)bp;
   // if part of LL
   if (fn->next) {
     fn->next->prev = fn->prev;
@@ -423,7 +431,7 @@ static void freelist_remove(void *bp) {
     fn->next->children[1] = fn->children[1];
     return;
   }
-  struct freenode * ance;
+  struct freenode_t * ance;
   // else if part of trie
   if (fn->children[0] != NULL) {
     ance = rmost(fn,0);
@@ -443,9 +451,9 @@ static void freelist_remove(void *bp) {
 }
 
 static void *freelist_bestfit(size_t sz) {
-  struct freenode * bestfit = NULL;
+  struct freenode_t * bestfit = NULL;
   size_t bit = BIN_FOR(sz);
-  struct freenode * bin = BINP_AT(bit); // bin has the address of the bin pointer
+  struct freenode_t * bin = BINP_AT(bit); // bin has the address of the bin pointer
   // try "bin" first
   while (bin) {
     #if DEBUG
@@ -454,12 +462,12 @@ static void *freelist_bestfit(size_t sz) {
         break;
       }
     #endif
-    size_t s = GET_SIZE(FOOTER(bin));
+    size_t s = GET_SIZE(bin);
     if (s == sz) {
       return bin;
     }
     if (s > sz) {
-      if ((bestfit == NULL) || ((WTYPE)(s) < GET_SIZE(FOOTER(bestfit)))) {
+      if ((bestfit == NULL) || ((WTYPE)(s) < GET_SIZE(bestfit))) {
         bestfit = bin;
       }
     }
@@ -493,15 +501,10 @@ int check_defines(void) {
     fprintf(stderr, "!!ALIGN is whack!!\n");
     problems++;
   }
-  if (sizeof(WTYPE) != WSIZE) {
+  if (sizeof(long) != WSIZE) {
     fprintf(stderr, "!!! WTYPE is whack!!\n");
     problems++;
-  }
-  if (ALIGN(CHUNKSIZE) != CHUNKSIZE) {
-    fprintf(stderr, "!!! CHUNKSIZE is whack!!\n");
-    problems++;
-  }
-  if (sizeof(NTYPE) != sizeof(void *)) {
+  if (sizeof(size_t) != sizeof(void *)) {
     fprintf(stderr, "!!! NTYPE and BITNESS are whack!!\n");
     problems++;
   }
@@ -523,11 +526,11 @@ int check_defines(void) {
 int check_bins() {
   int s;
   long unsigned c = 0;
-  for(s = MAX_SIZE; s > MIN_SIZE; s = s >> 1) {
+  for(s = MAX_SIZE; s >= MIN_SIZE; s = s >> 1) {
     size_t b = BIN_FOR(s);
-    BINP_AT(b) = (void *)(c++);
+    heap->bins[b] = (void *)(c++);
   }
-  struct freenode **l = (mem_heap_lo() + WSIZE);
+  struct freenode_t **l = (mem_heap_lo() + WSIZE);
   for (c = 0; c < BIT_COUNT; c++) {
     if (l[c] != (void *)(c)) {
       fprintf(stderr, "!!! There's a serious bins problem!\n");
@@ -560,8 +563,8 @@ int mm_check(void) {
 }
 
 int ends_in_epilogue(void) {
-  void *ep = mem_heap_hi() + 1 - WSIZE;
-  if (GET(ep) != PACKALLOC(0,1)) {
+  size_t *ep = (mem_heap_hi() + 1 - WSIZE);
+  if (*ep != PACK(0,1)) {
     return 0;
   } else {
     return 1;
@@ -573,8 +576,8 @@ int uncoalesced(void) {
   void *bp;
   int previous_free = 0;
   int number = 0;
-  for (bp = heap_listp; GET_SIZE(HEADER(bp))>0; bp = NEXT_BLKP(bp)) {
-    if (!IS_ALLOC(HEADER(bp))) {
+  for (bp = heap->head[1]; GET_SIZE(bp)>0; bp = NEXT_BLKP(bp)) {
+    if (!IS_ALLOC(bp)) {
       if (previous_free) {
         number++;
       }
@@ -589,7 +592,7 @@ int uncoalesced(void) {
 int inconsistant_footer(void) {
   void *bp;
   int number = 0;
-  for (bp = heap_listp; GET_SIZE(HEADER(bp))>0; bp = NEXT_BLKP(bp)) {
+  for (bp = heap->head[1]; GET_SIZE(bp)>0; bp = NEXT_BLKP(bp)) {
     if (HEADER(bp) != FOOTER(bp)) {
       number++;
     }

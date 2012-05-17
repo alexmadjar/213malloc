@@ -467,6 +467,7 @@ static void *freelist_bestfit(size_t sz) {
       return bin;
     }
   }
+  // once more for bit = 0
   bin = heap->bins[bit];
   if (bin != NULL) {
     return bin;
@@ -533,19 +534,23 @@ int uncoalesced(void);
 int inconsistant_footer(void);
 int ends_in_epilogue(void);
 
+int err(char * message);
+
+int err(char * message) {
+  fprintf(stderr, "%s\n", message);
+  return 0;
+}
+
 // returns 0 IFF problem
 int mm_check(void) {
   if(!ends_in_epilogue()) {
-    fprintf(stderr, "!! The heap doesn't end in an epilogue!\n");
-    return 0;
+    return err("!! The heap doesn't end in an epilogue!");
   }
   if(inconsistant_footer()) {
-    fprintf(stderr, "!! Some blocks have inconsistant headers and footers!\n");
-    return 0;
+    return err("!! Some blocks have inconsistant headers and footers!");
   }
   if(uncoalesced()) {
-    fprintf(stderr, "!! Some blocks escaped coalescing!\n");
-    return 0;
+    return err("!! Some blocks escaped coalescing!");
   }
   return 1;
 }

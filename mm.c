@@ -110,7 +110,7 @@ struct heaphead_t * heap;
 #define PREV_FOOTER(bp) (((size_t *)(bp))[-2])
 #define GET_SIZE(p)  PACK_SIZE(HEADER(p))
 #define IS_ALLOC(p)  PACK_IS_ALLOC(HEADER(p))
-#define FOOTER(bp) ((char *)(bp) + GET_SIZE(bp))
+#define FOOTER(bp) (((char *)(bp)) + GET_SIZE(bp))
 #define NEXT_BLKP(bp) ((char *)(bp) + DSIZE + GET_SIZE(bp))
 #define PREV_BLKP(bp) ((char *)(bp) - DSIZE - PACK_SIZE(PREV_FOOTER(bp)))
 

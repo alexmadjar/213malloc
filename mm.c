@@ -461,11 +461,15 @@ static void *freelist_bestfit(size_t sz) {
     return bestfit;
   }
   // if that doesn't work find anything larger
-  for (bit = BIN_FOR(sz)-1; bit >= 0; bit--) {
+  for (bit = BIN_FOR(sz)-1; bit > 0; bit--) {
     bin = heap->bins[bit];
     if (bin != NULL) {
       return bin;
     }
+  }
+  bin = heap->bins[bit];
+  if (bin != NULL) {
+    return bin;
   }
   return NULL;
 }
@@ -514,7 +518,7 @@ int check_bins() {
     size_t b = BIN_FOR(s);
     heap->bins[b] = (void *)(c++);
   }
-  struct freenode_t **l = (mem_heap_lo() + WSIZE);
+  struct freenode_t **l = heap->bins;
   for (c = 0; c < BIT_COUNT; c++) {
     if (l[c] != (void *)(c)) {
       fprintf(stderr, "!!! There's a serious bins problem!\n");

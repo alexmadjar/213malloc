@@ -95,19 +95,19 @@ struct heaphead_t
   struct freenode_t *bins[BIT_COUNT];
   size_t prologue[2];
   size_t head[1];
-}
+};
 
 // Our global heap pointer
 struct heaphead_t * heap;
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))
 /* Pack a size and allocated bit into a word */
-#define PACK(size, alloc)  ((size) | (alloc))
+#define PACK(size, alloc)  ((size_t)((size) | (alloc)))
 /* Read the size and allocated fields from address p */
 #define PACK_SIZE(packed)  ((packed) & ~(ALIGNMENT-1))
 #define PACK_IS_ALLOC(packed) ((packed) & 0x1)
-#define HEADER(bp) ((size_t *)(bp)[-1])
-#define PREV_FOOTER(bp) ((size_t *)(bp)[-2])
+#define HEADER(bp) (((size_t *)(bp))[-1])
+#define PREV_FOOTER(bp) (((size_t *)(bp))[-2])
 #define GET_SIZE(p)  PACK_SIZE(HEADER(p))
 #define IS_ALLOC(p)  PACK_IS_ALLOC(HEADER(p))
 #define FOOTER(bp) ((char *)(bp) + GET_SIZE(bp))
@@ -143,20 +143,20 @@ int mm_init(void)
    #if DEBUG>1
       fprintf(stderr, "Initializing heap with %d bins\n", BIT_COUNT);
    #endif
-   char * space;
+   void * space;
    /* Create the initial empty heap */
-   if ((space = mem_sbrk(ALIGN(sizeof(heaphead_t))) == (void *)-1) {
+   if ((space = mem_sbrk(ALIGN(sizeof(struct heaphead_t)))) == (void *)-1) {
     #if DEBUG
        fprintf(stderr, "!! unable to sbrk the header!\n");
     #endif
      return -1;
    }
-   heap = space + ALIGN(sizeof(heaphead_t)) - sizeof(heaphead_t);
+   heap = (space + ALIGN(sizeof(struct heaphead_t)) - sizeof(struct heaphead_t));
    int a;
    for (a = 0; a < BIT_COUNT; a++) {
      heap->bins[a] = NULL;
    }
-   heap->head[0] = heap->prologue[0] = heap->prologue[1] = PACK(0,1)
+   heap->head[0] = heap->prologue[0] = heap->prologue[1] = PACK(0,1);
 
    #if DEBUG
       if(check_defines()) {

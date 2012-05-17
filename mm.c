@@ -110,7 +110,7 @@ struct heaphead_t * heap;
 #define PREV_FOOTER(bp) (((size_t *)(bp))[-2])
 #define GET_SIZE(p)  PACK_SIZE(HEADER(p))
 #define IS_ALLOC(p)  PACK_IS_ALLOC(HEADER(p))
-#define FOOTER(bp) (((char *)(bp)) + GET_SIZE(bp))
+#define FOOTER(bp) (*((size_t *)(((char *)(bp)) + GET_SIZE(bp))))
 #define NEXT_BLKP(bp) ((char *)(bp) + DSIZE + GET_SIZE(bp))
 #define PREV_BLKP(bp) ((char *)(bp) - DSIZE - PACK_SIZE(PREV_FOOTER(bp)))
 
@@ -222,8 +222,8 @@ void mm_free(void *bp){
 static inline void *coalesce(void *bp)
 {
   void *next = NEXT_BLKP(bp);
-  WTYPE prev_alloc = PACK_IS_ALLOC(PREV_FOOTER(bp));
-  WTYPE next_alloc = IS_ALLOC(next);
+  int prev_alloc = PACK_IS_ALLOC(PREV_FOOTER(bp));
+  int next_alloc = IS_ALLOC(next);
   size_t size = GET_SIZE(bp);
   if (prev_alloc && next_alloc) {
     // no op
@@ -360,9 +360,9 @@ void *mm_realloc(void *ptr, size_t size)
 // Gets the bin number for a size: note larger sizes -> smaller bin number
 #define BIN_FOR(asize) ((__builtin_clzl(asize))-BIT_OFFSET)
 
-static struct freenode_t * rmost(struct freenode_t * n, NTYPE r);
+static struct freenode_t * rmost(struct freenode_t * n, size_t r);
 
-static struct freenode_t * rmost(struct freenode_t * n, NTYPE r) {
+static struct freenode_t * rmost(struct freenode_t * n, size_t r) {
   if (n->children[r] == NULL) {
     return NULL;
   }
@@ -394,7 +394,7 @@ static void *freelist_add(void *bp) {
       *bin = fn;
       return bp;
     }
-    bin = &((*bin)->children[BIT_N(asize,++bit)])
+    bin = &((*bin)->children[BIT_N(asize,++bit)]);
     #if DEBUG
       if (bit > 64) {
         fprintf(stderr, "!! Infinite loop in freelist_add!\n");
@@ -487,6 +487,7 @@ int check_defines(void) {
   if (sizeof(long) != WSIZE) {
     fprintf(stderr, "!!! WTYPE is whack!!\n");
     problems++;
+  }
   if (sizeof(size_t) != sizeof(void *)) {
     fprintf(stderr, "!!! NTYPE and BITNESS are whack!!\n");
     problems++;
@@ -520,7 +521,7 @@ int check_bins() {
       return 1;
     }
   }
-  memset(l, 0, BINS_SIZE);
+  memset(l, 0, sizeof(struct freenode_t *)*BIT_COUNT);
   return 0;
 }
 
@@ -559,7 +560,7 @@ int uncoalesced(void) {
   void *bp;
   int previous_free = 0;
   int number = 0;
-  for (bp = heap->head[1]; GET_SIZE(bp)>0; bp = NEXT_BLKP(bp)) {
+  for (bp = &(heap->head[1]); GET_SIZE(bp)>0; bp = NEXT_BLKP(bp)) {
     if (!IS_ALLOC(bp)) {
       if (previous_free) {
         number++;
@@ -575,7 +576,7 @@ int uncoalesced(void) {
 int inconsistant_footer(void) {
   void *bp;
   int number = 0;
-  for (bp = heap->head[1]; GET_SIZE(bp)>0; bp = NEXT_BLKP(bp)) {
+  for (bp = &(heap->head[1]); GET_SIZE(bp)>0; bp = NEXT_BLKP(bp)) {
     if (HEADER(bp) != FOOTER(bp)) {
       number++;
     }

@@ -300,8 +300,8 @@ void *mm_malloc(size_t size)
   }
   if (!mm_check()) {
     fprintf(stderr, "!!!!!!!!! mm_check failed !!!!!!!!!!\n");
-  }
   #endif
+  }
   return bp;
 }
 

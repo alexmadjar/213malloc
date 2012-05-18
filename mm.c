@@ -366,15 +366,18 @@ void *mm_realloc(void *ptr, size_t size)
 
 #define set_n_bit(size, bitp, bit) ((((~((size_t)(1))) & ((size) >> (BITNESS-(bitp)))) | (size_t)(bit)) << (BITNESS-(bitp)))
 
-static struct freenode_t * rmost(struct freenode_t * n, size_t r);
+static struct freenode_t * leaf(struct freenode_t * n);
 
-static struct freenode_t * rmost(struct freenode_t * n, size_t r) {
-  if (n->children[r] == NULL) {
-    return NULL;
+static struct freenode_t * leaf(struct freenode_t * n) {
+  leaf_loop:
+  if (n->children[0] != NULL) {
+    n = n->children[0];
+    goto leaf_loop;
   }
-  do {
-    n = n->children[r];
-  } while (n->children[r]);
+  if (n->children[1] != NULL) {
+    n = n->children[1];
+    goto leaf_loop;
+  }
   return n;
 }
 
@@ -397,9 +400,11 @@ static void *freelist_add(void *bp) {
     if (GET_SIZE(*bin) == asize) {
       fn->prev = bin;
       fn->next = *bin;
-      fn->children[0] = (*bin)->children[0];
+      if((fn->children[0] = (*bin)->children[0]) != NULL)
+        fn->children[0]->prev = &(fn->children[0]);
       (*bin)->children[0] = NULL;
-      fn->children[1] = (*bin)->children[1];
+      if((fn->children[1] = (*bin)->children[1]) != NULL)
+        fn->children[1]->prev = &(fn->children[1]);
       (*bin)->children[1] = NULL;
       (*bin)->prev = &(fn->next);
       *bin = fn;
@@ -428,29 +433,24 @@ static void freelist_remove(void *bp) {
   if (fn->next != NULL) {
     fn->next->prev = fn->prev;
     *(fn->prev) = fn->next;
-    fn->next->children[0] = fn->children[0];
-    fn->next->children[1] = fn->children[1];
+    if((fn->next->children[0] = fn->children[0]) != NULL)
+      fn->children[0]->prev = &(fn->next->children[0]);
+    if((fn->next->children[1] = fn->children[1]) != NULL)
+      fn->children[1]->prev = &(fn->next->children[1]);
     return;
   }
-  struct freenode_t * ancestor;
-  // else if part of trie
-  if (fn->children[0] != NULL) {
-    ancestor = rmost(fn,0);
-    *(ancestor->prev) = NULL;
-    ancestor->children[0] = fn->children[0];
-    ancestor->children[1] = fn->children[1];
-    ancestor->prev = fn->prev;
+  struct freenode_t * ancestor = leaf(fn);
+  if (ancestor == fn) {
+    *(fn->prev) = NULL;
   } else {
-    // 0-most is definately NULL 
-    ancestor = rmost(fn,1);
-    if (ancestor != NULL) {
-      *(ancestor->prev) = NULL;
-      ancestor->children[0] = fn->children[0];
-      ancestor->children[1] = fn->children[1];
-      ancestor->prev = fn->prev;
-    }
+    *(ancestor->prev) = NULL;
+    if((ancestor->children[0] = fn->children[0]) != NULL)
+      ancestor->children[0]->prev = &(ancestor->children[0]);
+    if((ancestor->children[1] = fn->children[1]) != NULL)
+      ancestor->children[1]->prev = &(ancestor->children[1]);
+    ancestor->prev = fn->prev;
+    *(fn->prev) = ancestor;
   }
-  *(fn->prev) = ancestor;
 }
 
 static void *freelist_bestfit(size_t sz) {

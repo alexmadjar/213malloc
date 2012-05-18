@@ -15,4 +15,4 @@ mdriver
 # OS Files
 .DS_Store
 icons*
-
+*.tgz

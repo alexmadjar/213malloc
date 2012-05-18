@@ -306,6 +306,9 @@ void *mm_malloc(size_t size)
     fprintf(stderr, "!!!!!!!!! mm_check failed !!!!!!!!!!\n");
   #endif
   }
+  #if DEBUG>1
+  fprintf(stderr, "+malloc returning %p (size=%lu)\n", bp, GET_SIZE(bp));
+  #endif
   return bp;
 }
 
@@ -326,6 +329,22 @@ static inline void place(void* bp, size_t asize) {
   }
 }
 
+void *dumb_realloc(void *ptr, size_t size) {
+    void *oldptr = ptr;
+    void *newptr;
+    size_t copySize;
+    
+    newptr = mm_malloc(size);
+    if (newptr == NULL)
+      return NULL;
+    copySize = GET_SIZE(oldptr);
+    if (size < copySize)
+      copySize = size;
+    memcpy(newptr, oldptr, copySize);
+    mm_free(oldptr);
+    return newptr;
+}
+
 /*
  * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
  * HINT: this will always work, so save making this more efficient for later
@@ -336,19 +355,31 @@ void *mm_realloc(void *ptr, size_t size)
     #if DEBUG>1
       fprintf(stderr, "reallocing block %p (size %lx) with new size %lx\n", ptr, GET_SIZE(ptr), size);
     #endif
-    void *oldptr = ptr;
-    void *newptr;
-    size_t copySize;
-    
-    newptr = mm_malloc(size);
-    if (newptr == NULL)
-      return NULL;
-    copySize = *(size_t *)((char *)oldptr - 8);
-    if (size < copySize)
-      copySize = size;
-    memcpy(newptr, oldptr, copySize);
-    mm_free(oldptr);
-    return newptr;
+    size = ALIGN(size);
+    long diff = size - GET_SIZE(ptr);
+    if (diff <= 0) {
+      place(ptr, size);
+    } else {
+      void *nxt_block = NEXT_BLKP(ptr);
+      if ((!IS_ALLOC(nxt_block)) && (DSIZE + GET_SIZE(nxt_block) >= diff)) {
+          freelist_remove(nxt_block);
+          size_t csize = DSIZE + GET_SIZE(nxt_block) + GET_SIZE(ptr);
+          HEADER(ptr) = PACK(csize, 1);
+          FOOTER(ptr) = PACK(csize, 1);
+          place(ptr, size);
+      } else {
+          ptr = dumb_realloc(ptr, size);
+      }
+    }
+    #if DEBUG
+    if (!mm_check()) {
+      fprintf(stderr, "!!!!!!!!! mm_check failed !!!!!!!!!!\n");
+    }
+    #endif
+    #if DEBUG>1
+    fprintf(stderr, "+realloc returning %p (size=%lx)\n", ptr, GET_SIZE(ptr));
+    #endif
+    return ptr;
 }
 
 /////////////////////

@@ -68,6 +68,10 @@ team_t team = {
 #ifndef NULL
 #  define NULL ((void *)(0))
 #endif
+#ifndef TRUE
+#  define TRUE  (1)
+#  define FALSE (0)
+#endif
 /* struct freenode_t
  *
  * This is the structure _inside_ the freespace (doesn't include header/footer)
@@ -533,8 +537,9 @@ int check_bins() {
 int uncoalesced(void);
 int inconsistant_footer(void);
 int ends_in_epilogue(void);
+int triecrawl(void);
 
-int err(char * message);
+extern int err(char * message);
 
 int err(char * message) {
   fprintf(stderr, "%s\n", message);
@@ -551,6 +556,9 @@ int mm_check(void) {
   }
   if(uncoalesced()) {
     return err("!! Some blocks escaped coalescing!");
+  }
+  if(triecrawl()) {
+    return err("!!! The trie is messed up!");
   }
   return 1;
 }
@@ -591,6 +599,71 @@ int inconsistant_footer(void) {
     }
   }
   return number;
+}
+
+int first_n_bits_the_same(size_t a, size_t b, size_t n);
+int test_free_and_unvisitted(struct freenode_t *n);
+int recursive_trie_node_test(struct freenode_t *n, size_t psize, size_t bit);
+
+int first_n_bits_the_same(size_t a, size_t b, size_t n) {
+  if (n == 0) return TRUE;
+  if (n >= BITNESS) return (a == b);
+  n = BITNESS - n;
+  n = ((size_t)(1)) << n; // 000...1000..
+  n--;        // 000...0111..
+  n = ~n;     // 111...1000..
+  return ((n & a) == (n & b));
+}
+
+#define assert_true(t, errormessage, args...) ((!(t)) ? fprintf(stderr, errormessage , ## args), (1) : (0))
+
+int triecrawl(void) {
+  int bin_number;
+  int ret = 0;
+  size_t largest_size_for_bin  =  MAX_SIZE;
+  // trie crawl to visit all
+  for (bin_number = 0; bin_number < BIT_COUNT; bin_number++) {
+    struct freenode_t *bin = heap->bins[bin_number];
+    ret += recursive_trie_node_test(bin, largest_size_for_bin, bin_number + 1 + BIT_OFFSET);
+    smallest_size_for_bin >>= 1;
+    largest_size_for_bin  >>= 1; 
+  }
+  // normal crawl to undo visits
+  void *bp;
+  for (bp = &(heap->head[1]); GET_SIZE(bp)>0; bp = NEXT_BLKP(bp)) {
+    if (!IS_ALLOC(bp)) {
+      if (PACK_IS_ALLOC(FOOTER(bp))) {
+        // was visitted
+        FOOTER(bp) = PACK(GET_SIZE(bp), 0);
+      } else {
+        // wasn't visitted!
+        fprintf(stderr, "!! node at %p (size=%lu) is not in the trie!\n", bp, GET_SIZE(bp));
+        ret++;
+      }
+    }
+  }
+  return ret;
+}
+
+#define set_n_bit(size, bitp, bit) ((((~((size_t)(1))) & ((size) >> (BITNESS-(bitp)))) | (size_t)(bit)) << (BITNESS-(bitp)))
+
+int recursive_trie_node_test(struct freenode_t *n, size_t psize, size_t bit) {
+  if (n == NULL) return 0;
+  int ret = assert_true(first_n_bits_the_same(psize, GET_SIZE(n), bit), "!! node at %p (size=%lu) has the wrong size for its spot in the trie!\n", n, GET_SIZE(n));
+  ret += test_free_and_unvisitted(n);
+  ret += recursive_trie_node_test(n->next, GET_SIZE(n), BITNESS);
+  bit++;
+  ret += recursive_trie_node_test(n->children[0], set_n_bit(psize, bit, 0), bit);
+  ret += recursive_trie_node_test(n->children[1], set_n_bit(psize, bit, 1), bit);
+  return ret;
+}
+
+int test_free_and_unvisitted(struct freenode_t *n) {
+  int ret = 0;
+  ret += assert_true(!IS_ALLOC(n), "!! freenode %p (size=%lu) is not free!\n", n, GET_SIZE(n));
+  ret += assert_true(!PACK_IS_ALLOC(FOOTER(n)), "!! freenode %p (size=%lu) is in the trie multiple times!\n", n, GET_SIZE(n));
+  FOOTER(n) = PACK(GET_SIZE(n), 1);
+  return ret;
 }
 
 // END DEBUG CODE

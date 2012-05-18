@@ -401,6 +401,7 @@ static void *freelist_add(void *bp) {
       (*bin)->children[0] = NULL;
       fn->children[1] = (*bin)->children[1];
       (*bin)->children[1] = NULL;
+      (*bin)->prev = &(fn->next);
       *bin = fn;
       return bp;
     }
@@ -424,7 +425,7 @@ static void freelist_remove(void *bp) {
   #endif
   struct freenode_t * fn = (struct freenode_t *)bp;
   // if part of LL
-  if (fn->next) {
+  if (fn->next != NULL) {
     fn->next->prev = fn->prev;
     *(fn->prev) = fn->next;
     fn->next->children[0] = fn->children[0];
@@ -438,6 +439,7 @@ static void freelist_remove(void *bp) {
     *(ancestor->prev) = NULL;
     ancestor->children[0] = fn->children[0];
     ancestor->children[1] = fn->children[1];
+    ancestor->prev = fn->prev;
   } else {
     // 0-most is definately NULL 
     ancestor = rmost(fn,1);
@@ -445,6 +447,7 @@ static void freelist_remove(void *bp) {
       *(ancestor->prev) = NULL;
       ancestor->children[0] = fn->children[0];
       ancestor->children[1] = fn->children[1];
+      ancestor->prev = fn->prev;
     }
   }
   *(fn->prev) = ancestor;
@@ -692,6 +695,7 @@ int test_free_and_unvisitted(struct freenode_t *n) {
   int ret = 0;
   ret += assert_true(!IS_ALLOC(n), "!! freenode %p (size=%lx) is not free!\n", n, GET_SIZE(n));
   ret += assert_true(!PACK_IS_ALLOC(FOOTER(n)), "!! freenode %p (size=%lx) is in the trie multiple times!\n", n, GET_SIZE(n));
+  ret += assert_true((*(n->prev) == n), "!! freenode %p (size=%lx) has a bad prev pointer!\n", n, GET_SIZE(n));
   FOOTER(n) = PACK(GET_SIZE(n), 1);
   return ret;
 }

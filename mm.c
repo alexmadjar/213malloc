@@ -364,6 +364,8 @@ void *mm_realloc(void *ptr, size_t size)
 // Gets the bin number for a size: note larger sizes -> smaller bin number
 #define BIN_FOR(asize) ((__builtin_clzl(asize))-BIT_OFFSET)
 
+#define set_n_bit(size, bitp, bit) ((((~((size_t)(1))) & ((size) >> (BITNESS-(bitp)))) | (size_t)(bit)) << (BITNESS-(bitp)))
+
 static struct freenode_t * rmost(struct freenode_t * n, size_t r);
 
 static struct freenode_t * rmost(struct freenode_t * n, size_t r) {
@@ -383,6 +385,7 @@ static void *freelist_add(void *bp) {
   size_t asize = GET_SIZE(bp);
   size_t bit = BIN_FOR(asize);
   struct freenode_t ** bin = &(heap->bins[bit]); // bin has the address of the bin pointer
+  bit += BIT_OFFSET;
   struct freenode_t * fn = (struct freenode_t *)bp;
   while(1) {
     if (*bin == NULL) {
@@ -401,7 +404,11 @@ static void *freelist_add(void *bp) {
       *bin = fn;
       return bp;
     }
-    bin = &((*bin)->children[BIT_N(asize,++bit)]);
+    ++bit;
+    #if DEBUG>1
+    fprintf(stderr, "bit=%lu, size=%lx, bit_n=%lu\n", bit, asize, BIT_N(asize,bit));
+    #endif
+    bin = &((*bin)->children[BIT_N(asize,bit)]);
     #if DEBUG
       if (bit > 64) {
         fprintf(stderr, "!! Infinite loop in freelist_add!\n");
@@ -652,8 +659,6 @@ int triecrawl(void) {
   }
   return ret;
 }
-
-#define set_n_bit(size, bitp, bit) ((((~((size_t)(1))) & ((size) >> (BITNESS-(bitp)))) | (size_t)(bit)) << (BITNESS-(bitp)))
 
 int recursive_trie_node_test(struct freenode_t *n, size_t psize, size_t bit) {
   #if DEBUG>1

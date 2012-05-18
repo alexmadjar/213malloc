@@ -180,13 +180,13 @@ int mm_init(void)
 
 static inline void *extend_heap(size_t bytes) {
   #if DEBUG>1
-    fprintf(stderr, "extending the heap by %lu bytes\n", bytes);
+    fprintf(stderr, "extending the heap by %lx bytes\n", bytes);
   #endif
   char *bp;
   size_t size;
   #if DEBUG
     if (bytes < MIN_SIZE) {
-      fprintf(stderr, "!!! Tried to extend heap by %lu bytes!\n", bytes);
+      fprintf(stderr, "!!! Tried to extend heap by %lx bytes!\n", bytes);
       return NULL;
     }
   #endif
@@ -205,7 +205,7 @@ static inline void *extend_heap(size_t bytes) {
 void mm_free(void *bp){
   size_t size = GET_SIZE(bp);
   #if DEBUG>1
-    fprintf(stderr, "Call to free with pointer %p (size: %lu)\n", bp, size);
+    fprintf(stderr, "Call to free with pointer %p (size: %lx)\n", bp, size);
   #endif
   HEADER(bp) = PACK(size, 0);
   FOOTER(bp) = PACK(size, 0); 
@@ -275,7 +275,7 @@ static inline void *coalesce(void *bp)
 void *mm_malloc(size_t size)
 {
   #if DEBUG>1
-    fprintf(stderr, "+malloc called with size=%lu\n", size);
+    fprintf(stderr, "+malloc called with size=%lx\n", size);
   #endif
   char *bp;
   // Ignore spurious requests
@@ -334,7 +334,7 @@ static inline void place(void* bp, size_t asize) {
 void *mm_realloc(void *ptr, size_t size)
 {
     #if DEBUG>1
-      fprintf(stderr, "reallocing block %p (size %lu) with new size %lu\n", ptr, GET_SIZE(ptr), size);
+      fprintf(stderr, "reallocing block %p (size %lx) with new size %lx\n", ptr, GET_SIZE(ptr), size);
     #endif
     void *oldptr = ptr;
     void *newptr;
@@ -377,6 +377,9 @@ static struct freenode_t * rmost(struct freenode_t * n, size_t r) {
 }
 
 static void *freelist_add(void *bp) {
+  #if DEBUG>1
+    fprintf(stderr, "adding node %p (size=%lx) to the trie\n", bp, GET_SIZE(bp));
+  #endif
   size_t asize = GET_SIZE(bp);
   size_t bit = BIN_FOR(asize);
   struct freenode_t ** bin = &(heap->bins[bit]); // bin has the address of the bin pointer
@@ -409,6 +412,9 @@ static void *freelist_add(void *bp) {
 }
 
 static void freelist_remove(void *bp) {
+  #if DEBUG>1
+    fprintf(stderr, "removing node %p (size=%lx) from the trie\n", bp, GET_SIZE(bp));
+  #endif
   struct freenode_t * fn = (struct freenode_t *)bp;
   // if part of LL
   if (fn->next) {
@@ -624,8 +630,10 @@ int triecrawl(void) {
   // trie crawl to visit all
   for (bin_number = 0; bin_number < BIT_COUNT; bin_number++) {
     struct freenode_t *bin = heap->bins[bin_number];
+    #if DEBUG>1
+      fprintf(stderr, "Bin %d (size=%lx)\n", bin_number, largest_size_for_bin);
+    #endif
     ret += recursive_trie_node_test(bin, largest_size_for_bin, bin_number + 1 + BIT_OFFSET);
-    smallest_size_for_bin >>= 1;
     largest_size_for_bin  >>= 1; 
   }
   // normal crawl to undo visits
@@ -637,7 +645,7 @@ int triecrawl(void) {
         FOOTER(bp) = PACK(GET_SIZE(bp), 0);
       } else {
         // wasn't visitted!
-        fprintf(stderr, "!! node at %p (size=%lu) is not in the trie!\n", bp, GET_SIZE(bp));
+        fprintf(stderr, "!! node at %p (size=%lx) is not in the trie!\n", bp, GET_SIZE(bp));
         ret++;
       }
     }
@@ -648,20 +656,37 @@ int triecrawl(void) {
 #define set_n_bit(size, bitp, bit) ((((~((size_t)(1))) & ((size) >> (BITNESS-(bitp)))) | (size_t)(bit)) << (BITNESS-(bitp)))
 
 int recursive_trie_node_test(struct freenode_t *n, size_t psize, size_t bit) {
+  #if DEBUG>1
+    fprintf(stderr, "node %p\n", n);
+  #endif
   if (n == NULL) return 0;
-  int ret = assert_true(first_n_bits_the_same(psize, GET_SIZE(n), bit), "!! node at %p (size=%lu) has the wrong size for its spot in the trie!\n", n, GET_SIZE(n));
+  #if DEBUG>1
+    fprintf(stderr, " (size=%lx)\n", GET_SIZE(n));
+  #endif
+  int ret = assert_true(first_n_bits_the_same(psize, GET_SIZE(n), bit), "!! node at %p (size=%lx) has the wrong size for its spot in the trie!\n", n, GET_SIZE(n));
   ret += test_free_and_unvisitted(n);
+  #if DEBUG>1
+    fprintf(stderr, "next: \n");
+  #endif
   ret += recursive_trie_node_test(n->next, GET_SIZE(n), BITNESS);
   bit++;
-  ret += recursive_trie_node_test(n->children[0], set_n_bit(psize, bit, 0), bit);
-  ret += recursive_trie_node_test(n->children[1], set_n_bit(psize, bit, 1), bit);
+  size_t zb = set_n_bit(psize, bit, 0);
+  size_t ob = set_n_bit(psize, bit, 1);
+  #if DEBUG>1
+    fprintf(stderr, "left (size=%lx):\n ", zb);
+  #endif
+  ret += recursive_trie_node_test(n->children[0], zb, bit);
+  #if DEBUG>1
+    fprintf(stderr, "right (size=%lx):\n ", ob);
+  #endif
+  ret += recursive_trie_node_test(n->children[1], ob, bit);
   return ret;
 }
 
 int test_free_and_unvisitted(struct freenode_t *n) {
   int ret = 0;
-  ret += assert_true(!IS_ALLOC(n), "!! freenode %p (size=%lu) is not free!\n", n, GET_SIZE(n));
-  ret += assert_true(!PACK_IS_ALLOC(FOOTER(n)), "!! freenode %p (size=%lu) is in the trie multiple times!\n", n, GET_SIZE(n));
+  ret += assert_true(!IS_ALLOC(n), "!! freenode %p (size=%lx) is not free!\n", n, GET_SIZE(n));
+  ret += assert_true(!PACK_IS_ALLOC(FOOTER(n)), "!! freenode %p (size=%lx) is in the trie multiple times!\n", n, GET_SIZE(n));
   FOOTER(n) = PACK(GET_SIZE(n), 1);
   return ret;
 }

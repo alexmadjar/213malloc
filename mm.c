@@ -54,7 +54,7 @@ team_t team = {
 //     1 -> low level checks
 //     2 -> verbose output
 //  All debug output is sent to stderr
-#define DEBUG (2)
+#define DEBUG (0)
 
 /* single word (4) or double word (8) alignment */
 #define ALIGNMENT 8
@@ -89,7 +89,7 @@ struct freenode_t
 #define DSIZE (2*(WSIZE))
 #define BITNESS  (8*POINTER_SIZE)
 #define MIN_SIZE ((size_t)(ALIGN(sizeof(struct freenode_t))))
-#define MAX_SIZE ((size_t)((1<<18)-ALIGNMENT))
+#define MAX_SIZE ((size_t)((1<<28)-ALIGNMENT))
 #define BIT_OFFSET (__builtin_clzl(MAX_SIZE))
 #define LSIG_BIT_OF_SIZE  (__builtin_clzl(ALIGNMENT))
 #define BIT_COUNT  (1 + (__builtin_clzl(MIN_SIZE)) - BIT_OFFSET)
@@ -574,6 +574,7 @@ int mm_check(void) {
     return err("!! Some blocks escaped coalescing!");
   }
   if(triecrawl()) {
+    exit(1);
     return err("!!! The trie is messed up!");
   }
   return 1;

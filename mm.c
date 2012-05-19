@@ -20,10 +20,7 @@
  */
 
 /*  Experiments to run:
- *  - inline keyword
  *  - which node in trie for bestfit
- *  - go left / right based on math vs logic
- *  - no assert.h etc
  *  - extend heap right away
  */
 
@@ -345,11 +342,7 @@ void *dumb_realloc(void *ptr, size_t size) {
     return newptr;
 }
 
-/*
- * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
- * HINT: this will always work, so save making this more efficient for later
- * TODO: More efficient version
- */
+
 void *mm_realloc(void *ptr, size_t size)
 {
     #if DEBUG>1

@@ -387,6 +387,11 @@ void *mm_realloc(void *ptr, size_t size)
 #define BIT_N(s,n) ((((size_t)(s))>>((BITNESS - 1) - (n))) & ((size_t)(1)))
 // Gets the bin number for a size: note larger sizes -> smaller bin number
 #define BIN_FOR(asize) ((__builtin_clzl(asize))-BIT_OFFSET)
+#define SAFE_SET(dest, source) if (((dest) = (source))!=NULL) (dest)->prev = &(dest)
+#define SET_CHILDREN(dest, source) \
+          SAFE_SET((dest)->children[0], (source)->children[0]); \
+          SAFE_SET((dest)->children[1], (source)->children[1])
+
 
 #define set_n_bit(size, bitp, bit) ((((~((size_t)(1))) & ((size) >> (BITNESS-(bitp)))) | (size_t)(bit)) << (BITNESS-(bitp)))
 
@@ -404,12 +409,6 @@ static struct freenode_t * leaf(struct freenode_t * n) {
   }
   return n;
 }
-
-#define SAFE_SET(dest, source) if (((dest) = (source))!=NULL) (dest)->prev = &(dest)
-#define SET_CHILDREN(dest, source) \
-          SAFE_SET((dest)->children[0], (source)->children[0]); \
-          SAFE_SET((dest)->children[1], (source)->children[1])
-
 
 static void *freelist_add(void *bp) {
   #if DEBUG>1

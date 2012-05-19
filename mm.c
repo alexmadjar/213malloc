@@ -11,23 +11,22 @@
  *    - There is no error checking without debug turned on
  *    - Should work on a wide array of machines (32/64 bit, embedded etc)
  *      because I tried to avoid type size assumptions. 
- *      This goal is however NOT THOROUGHLY TESTED and shouldn't be blindly relied on
+ *      This goal is however NOT THOROUGHLY TESTED and shouldn't be relied on
+ *    - It assumes that DSIZE is aligned
  *  
  * For a more complete description, see the comment at the end of the file.
  *
  * Author: Alex Madjar
- * License:  Don't use this for anything besides grading me (yet because it's not ready!)
+ * License:  Don't use this for anything besides grading me ;)
  */
 
-/*  Experiments to run: // current best is 79%
- *  - 
- */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <unistd.h>
 #include <string.h>
+#include <limits.h>
 
 #include "mm.h"
 #include "memlib.h"
@@ -45,6 +44,8 @@ team_t team = {
     ""
 };
 
+// The following 3 defines are the only setable constants in my code:
+
 //  Turn debugging code on
 //     0 -> no debugging checks or output
 //     1 -> low level checks
@@ -52,13 +53,19 @@ team_t team = {
 //  All debug output is sent to stderr
 #define DEBUG (0)
 
-/* single word (4) or double word (8) alignment */
+/* byte alignment (must be power of two and evenly divide DSIZE) */
 #define ALIGNMENT 8
+
+// the largest size a block is allowed to be (must be aligned)
+#define MAX_SIZE ((size_t)((1<<28)-ALIGNMENT))
+
+// The rest of the definitions are computed values
 
 /* rounds up to the nearest multiple of ALIGNMENT 
     NOTE: ALIGNMENT must be a power of two
  */
 #define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~(ALIGNMENT-1))
+
 
 /* Basic constants and types*/
 #ifndef NULL
@@ -83,13 +90,18 @@ struct freenode_t
 #define POINTER_SIZE (sizeof(void *)) /* size of pointers */
 #define WSIZE (sizeof(size_t))
 #define DSIZE (2*(WSIZE))
-#define BITNESS  (8*POINTER_SIZE)
+#define BITNESS  (CHAR_BIT*POINTER_SIZE)
 #define MIN_SIZE ((size_t)(ALIGN(sizeof(struct freenode_t))))
-#define MAX_SIZE ((size_t)((1<<28)-ALIGNMENT))
 #define BIT_OFFSET (__builtin_clzl(MAX_SIZE))
 #define LSIG_BIT_OF_SIZE  (__builtin_clzl(ALIGNMENT))
 #define BIT_COUNT  (1 + (__builtin_clzl(MIN_SIZE)) - BIT_OFFSET)
-
+/* struct heaphead_t
+ * 
+ * This structure occures exactly once at the start of the heap.
+ * It stores all the initial size bins, the prologue bytes
+ * and (via &ptr->head[1]) points to first block on the heap
+ *
+ */
 struct heaphead_t
 {
   struct freenode_t *bins[BIT_COUNT];
@@ -97,26 +109,33 @@ struct heaphead_t
   size_t head[1];
 };
 
-// Our global heap pointer
+// The global heap pointer (NOTE: the only global variable in the system)
 struct heaphead_t * heap;
 
-#define MAX(x, y) ((x) > (y)? (x) : (y))
+
+/* Basic macro functions */
 /* Pack a size and allocated bit into a word */
 #define PACK(size, alloc)  ((size_t)((size) | (alloc)))
-/* Read the size and allocated fields from address p */
+/* Read the size and allocated fields from an int */
 #define PACK_SIZE(packed)  ((packed) & ~(ALIGNMENT-1))
 #define PACK_IS_ALLOC(packed) ((packed) & 0x1)
+/* point us to bp's header */
 #define HEADER(bp) (((size_t *)(bp))[-1])
+// or previous footer (for efficiency, because HEADER(PREV_BLKP) is hard)
 #define PREV_FOOTER(bp) (((size_t *)(bp))[-2])
+// gets size/alloc from a pointer
 #define GET_SIZE(p)  PACK_SIZE(HEADER(p))
 #define IS_ALLOC(p)  PACK_IS_ALLOC(HEADER(p))
+// slower functions
 #define FOOTER(bp) (*((size_t *)(((char *)(bp)) + GET_SIZE(bp))))
 #define NEXT_BLKP(bp) ((char *)(bp) + DSIZE + GET_SIZE(bp))
 #define PREV_BLKP(bp) ((char *)(bp) - DSIZE - PACK_SIZE(PREV_FOOTER(bp)))
 
 
-
+/////////////////
 // Basic internal implicit list / heap operations
+///////////////
+
 static inline void *extend_heap(size_t bytes); /* grow heap bytes size */
 static inline void *coalesce(void *bp); /* merge newly free block with neighbors 
                                              and add to freelist */
@@ -133,10 +152,10 @@ static void *freelist_add(void *bp);
 static void freelist_remove(void *bp);
 static void *freelist_bestfit(size_t sz);
 
-// redone through here
-
 /* 
  * mm_init - initialize the malloc package.
+ *   makes the bins and initial prologue / epilogue
+ *   allocates _no_ initial free space
  */
 int mm_init(void)
 {
@@ -165,15 +184,10 @@ int mm_init(void)
       }
    #endif
   
-   /* Extend the empty heap with a free block of CHUNKSIZE bytes */
- // if (extend_heap(CHUNKSIZE) == NULL)
- //   return -1;
   return 0;
 }
 
-
-// rewritten through here
-
+// extends the heap by bytes. NOTE: doesn't change the freelist
 static inline void *extend_heap(size_t bytes) {
   #if DEBUG>1
     fprintf(stderr, "extending the heap by %lx bytes\n", bytes);
@@ -269,6 +283,9 @@ static inline void *coalesce(void *bp)
   return bp;
 }
 
+// mm_malloc: this is the primary malloc call
+// it only allocates new space on the heap as a last resort
+// and then only does it as much as necessary
 void *mm_malloc(size_t size)
 {
   #if DEBUG>1
@@ -278,6 +295,12 @@ void *mm_malloc(size_t size)
   // Ignore spurious requests
   if (size == 0)
     return NULL;
+  if (size > MAX_SIZE) {
+    #if DEBUG
+      fprintf(stderr, "!! malloc called with size %lx > %lx\n", size, MAX_SIZE);
+    #endif
+    return NULL;
+  }
   /* Adjust block size to include overhead and alignment reqs. */
   if (size < MIN_SIZE)
     size = MIN_SIZE;
@@ -288,9 +311,7 @@ void *mm_malloc(size_t size)
     freelist_remove(bp);
     place(bp, size);
   } else {
-    // TODO: play with this
-    // size_t extendsize;
-    // extendsize = MAX(CHUNKSIZE,size);
+    // if one wasn't found, create new space
     if ((bp = extend_heap(size)) != NULL) {
       place(bp, size);
     }
@@ -310,6 +331,7 @@ void *mm_malloc(size_t size)
 }
 
 // actually allocate this block with size asize
+// splitting off freespace on the end if necessary
 static inline void place(void* bp, size_t asize) {
   size_t csize = GET_SIZE(bp);
   if ((csize - asize) >= MIN_SIZE + DSIZE) {
@@ -326,6 +348,7 @@ static inline void place(void* bp, size_t asize) {
   }
 }
 
+// a simple realloc that only allocates new space and copies
 void *dumb_realloc(void *ptr, size_t size) {
     void *oldptr = ptr;
     void *newptr;
@@ -342,7 +365,7 @@ void *dumb_realloc(void *ptr, size_t size) {
     return newptr;
 }
 
-
+// smart realloc that attempts to leave the block in place if at all possible
 void *mm_realloc(void *ptr, size_t size)
 {
     #if DEBUG>1
@@ -383,20 +406,21 @@ void *mm_realloc(void *ptr, size_t size)
  *
  */
 
-// zero indexed from most significant bit bit-accessor for unsigned long 
+// zero indexed from most significant bit bit-accessor 
 #define BIT_N(s,n) ((((size_t)(s))>>((BITNESS - 1) - (n))) & ((size_t)(1)))
 // Gets the bin number for a size: note larger sizes -> smaller bin number
 #define BIN_FOR(asize) ((__builtin_clzl(asize))-BIT_OFFSET)
+// safely sets a freenode pointer and its back pointer
 #define SAFE_SET(dest, source) if (((dest) = (source))!=NULL) (dest)->prev = &(dest)
+// copies the child pointers from source to dest
 #define SET_CHILDREN(dest, source) \
           SAFE_SET((dest)->children[0], (source)->children[0]); \
           SAFE_SET((dest)->children[1], (source)->children[1])
-
-
+// turns [size:xxxxxx..] into [xxxxxx[bit]00000...]
 #define set_n_bit(size, bitp, bit) ((((~((size_t)(1))) & ((size) >> (BITNESS-(bitp)))) | (size_t)(bit)) << (BITNESS-(bitp)))
 
-static struct freenode_t * leaf(struct freenode_t * n);
-
+// finds the rightmost leaf of the trie
+// NOTE: rightmost is more efficient than leftmost in trials
 static struct freenode_t * leaf(struct freenode_t * n) {
   leaf_loop:
   if (n->children[1] != NULL) {
@@ -415,6 +439,12 @@ static void *freelist_add(void *bp) {
     fprintf(stderr, "adding node %p (size=%lx) to the trie\n", bp, GET_SIZE(bp));
   #endif
   size_t asize = GET_SIZE(bp);
+  if (asize > MAX_SIZE) {
+    #if DEBUG
+    fprintf(stderr, "!! attempting to add block size %lx > %lx to freelist!\n", asize, MAX_SIZE);
+    #endif
+    return NULL;
+  }
   size_t bit = BIN_FOR(asize);
   struct freenode_t ** bin = &(heap->bins[bit]); // bin has the address of the bin pointer
   bit += BIT_OFFSET;
@@ -477,7 +507,7 @@ static void *freelist_bestfit(size_t sz) {
   struct freenode_t * bestfit = NULL;
   size_t bit = BIN_FOR(sz);
   struct freenode_t * bin = heap->bins[bit]; // bin has the address of the bin pointer
-  // try "bin" first
+  // try the correct bin first
   while (bin) {
     #if DEBUG
       if (bit > LSIG_BIT_OF_SIZE) {
@@ -512,6 +542,7 @@ static void *freelist_bestfit(size_t sz) {
   if (bin != NULL) {
     return bin;
   }
+  // guess we got nothing for you
   return NULL;
 }
 
@@ -533,20 +564,12 @@ int check_defines(void) {
     fprintf(stderr, "!!! WTYPE is whack!!\n");
     problems++;
   }
-  if (sizeof(size_t) != sizeof(void *)) {
-    fprintf(stderr, "!!! NTYPE and BITNESS are whack!!\n");
-    problems++;
-  }
   if (!BIT_N(MAX_SIZE,BIT_OFFSET) || BIT_N(MAX_SIZE,BIT_OFFSET-1) || BIT_N(MIN_SIZE,LSIG_BIT_OF_SIZE+1) || !BIT_N(ALIGNMENT,LSIG_BIT_OF_SIZE)) {
     fprintf(stderr, "!!! BIT_N is whack!!\n");
     problems++;
   }
   if (check_bins()) {
     fprintf(stderr, "!!! THE BINS is whack!!\n");
-    problems++;
-  }
-  if (MAX(2,1) != 2 || MAX(1,2) != 2) {
-    fprintf(stderr, "!!! MAX is whack!!\n");
     problems++;
   }
   return problems;
@@ -627,6 +650,7 @@ int uncoalesced(void) {
   return number;
 }
 
+// returns the number of blocks with inconsistant headers and footers
 int inconsistant_footer(void) {
   void *bp;
   int number = 0;
@@ -654,6 +678,9 @@ int first_n_bits_the_same(size_t a, size_t b, size_t n) {
 
 #define assert_true(t, errormessage, args...) ((!(t)) ? fprintf(stderr, errormessage , ## args), (1) : (0))
 
+// this is out primary testing function
+// it crawls the entire freelist tree checking for consistancy
+// see the long comments at the end for full documentation
 int triecrawl(void) {
   int bin_number;
   int ret = 0;
@@ -724,4 +751,166 @@ int test_free_and_unvisitted(struct freenode_t *n) {
 // END DEBUG CODE
 #endif
 
+/**************************************
+******* DOCUMENTATION *****************
+***************************************
 
+I hope you find this interesting.
+
+
+///////////////////////
+// Heap structure
+///////////////////////
+
+
+max alloc size is 268,435,448 Bytes (256 MB or 0b1111111111111111111111111000 or 4 0's, 25 1's and 3 0's)
+because 256MB and larger are best done using mmap
+
+min alloc size is 4*sizeof(void*)
+because free nodes contain:
+node* next  // a pointer to the next node in the stack of the same size
+node* left  // a pointer to the left child in the trie
+node* right // a pointer to the right child in the trie
+node** prev // a pointer to the node* that points here
+
+NOTE: left and right are stored in an array in order to make access easier without using a branch statement. children[0] -> left [1] -> right
+
+every block (whether free or allocated) has a 1 WSIZE (from here on WSIZE is defined as sizeof(size_t)) header and footer:
+isAllocated = 0 or 1
+size = 8 byte aligned byte-size of the block (not including the header / footer)
+header/footer = size BITWISEOR isAllocated
+NOTE: The total space this takes up is size + DSIZE  where DSIZE is 2*WSIZE
+
+We create 24 bins of sizes by the number of zeros before the first 1 in the size (calculated using the clz function)
+because clz(max_size) = 4 and clz(min_size) = 27
+clz(size)-4 = bin number (0 through 23 inclusive)
+
+We divide the heap space as such: (key: *=pointer, not a size; in increasing address space)
+*heap base*
+unused padding bytes for alignment +
+* "heap" pointer *
+24 WORDs for the size buckets
+1 WORD set to "1"
+*official heap start pointer*
+1 WORD set to "1" - prologue
+X BLOCKS OF FREE AND ALLOCATED MEMORY
+1 WORD set to "1" - epilog
+usused padding bytes - "the wilderness" <- in this implementation this is size 0
+*brk pointer / end of heap*
+
++ NOTE: in a production malloc we would use this padding to ensure that all valid pointers are 8 byte aligned and discard all free calls with non-aligned pointers. Perhaps in the future we'll add this level of robustness.
+
+/////////////////
+// Free List data structure
+////////////////
+
+
+Each bin contains a root pointer to a bitwise trie for blocks in that size range, and each node in the bitwise trie points to a stack of blocks of the same size.
+
+Below is a discussion of how a bitwise trie generally works.
+--------
+Bitwise Trie
+--------
+
+
+Trie Structure
+
+The root of the trie contains a single pointer to the first node. There are no
+requirements about the key of this first node.
+
+
+Trie Node
+
+Each trie node contains two pointers to a left an right child node. All the
+nodes in the left subtree are guaranteed to be less than the nodes in the
+right subtree; however, the value of the parent node has no relation with any
+of the children. This seems counter-intuitive at first, but it will make sense
+as we go through the algorithms.
+
+The key for each node is the size of the free chunk. The value is a pointer to
+the beginning of the free chunk. Given the pointer to a free chunk, we should
+be able to get it's size.
+
+
+Insert Operation
+
+insert(size_t size, void *value)
+
+Check if the root pointer is NULL. Insert that new node as the head of the
+trie, and return.
+
+Otherwise, we need to scan the bits of 'size' from left-to-right, starting
+with what we will denote bit 0. We get a pointer to the head node, what we
+will call the current node. Using bit 0, we take either the left or right
+child node (0 corresponds to left, 1 corresponds to right). If this child node
+is NULL, then we create a new node and attach it as the left/right child.
+
+Otherwise, we set the current node to the proper non-NULL left/right child. We
+then iterate the above process using the next bit (now bit 1). We continue
+this process until we find a NULL node.
+
+Note: If we try to insert a node that already exists, bad things will happen.
+You should prefix each iteration with a check to verify that our key (the
+size) does not exactly match the key of the current node.
+
+
+Find Operation
+
+Check if the root pointer is NULL. If so, return NULL.
+
+Otherwise, we scan the bits of 'size' from left-to-right, starting with what
+we will denote as bit 0. We obtain a pointer to the head node, which we will
+call the current node.
+
+Check if the current node's key and the desired key match. If so, return the
+current node value. Otherwise, using bit 0, we take either the left or right
+child node. If this child is NULL, then the desired node does not exist, and
+return NULL.
+
+Otherwise, we set the current node to the proper non-NULL left/right child. We
+then iterate the above process using the next bit (now bit 1). We continue
+this process until we reach a NULL or find the node we want.
+
+
+Best-Fit Operation
+
+void *bestfit(size_t size)
+
+Check if the root pointer is NULL. If so, return NULL.
+
+Otherwise, we scan the bits of 'size' from left-to-right, starting with what
+we will denote as bit 0. We obtain a pointer to the head node, which we will
+call the current node. We set a pointer, which we will call the best-fit
+pointer, to NULL.
+
+We check the current node's size, if it is larger than the desired size. If
+so, then we have a possible best fit. If the best-fit pointer is NULL, then it
+is our best fit; otherwise, if the current node's size is less than the
+best-fit pointer's size, then we have a new best fit and update the best-fit
+pointer accordingly.
+
+
+Remove Operation
+
+void remove(size_t size)
+
+Find the node using the find operation. Replace the node with any child node.
+Since there is no requirement on ordering of the parent with respect to it's
+children, it does not matter which child you pick. It also guarantees that the
+left subtree is still strictly less than the right subtree.
+
+(The code I have suggests using the right-most child node, it offset places
+where the left-most node is preferred)
+
+------
+stack
+------
+
+Note that a bitwise trie cannot contain multiple nodes of the same size yet our freelist must be able to do so.
+
+We do this by making each node in the bitwise trie the head of a stack, where all members of the stack are the same size.
+
+consistant use of the "prev" pointer pointer makes both the trie and the stack doubly linked, which allows efficient and somewhat agnostic node insertion and removal.
+
+
+*********************************/

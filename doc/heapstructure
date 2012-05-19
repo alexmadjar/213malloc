@@ -1,5 +1,5 @@
-max alloc size is TODO Bytes (or 0b1111111111111111111111111000 or 4 0's, 25 1's and 3 0's)
-because 256kB and larger are best done using mmap
+max alloc size is 268,435,448 Bytes (256 MB or 0b1111111111111111111111111000 or 4 0's, 25 1's and 3 0's)
+because 256MB and larger are best done using mmap
 
 min alloc size is 4*sizeof(void*)
 because free nodes contain:
@@ -33,7 +33,7 @@ X BLOCKS OF FREE AND ALLOCATED MEMORY
 usused padding bytes - "the wilderness"
 *brk pointer / end of heap*
 
-+ NOTE: in a production malloc we would use this padding to ensure that all valid pointers are 8 byte aligned and discard all free calls with non-aligned pointers. Do we need this level of robustness?
++ NOTE: in a production malloc we would use this padding to ensure that all valid pointers are 8 byte aligned and discard all free calls with non-aligned pointers. Perhaps in the future we'll add this level of robustness.
 
 INVARIANTS:   Things that should always be the case
 

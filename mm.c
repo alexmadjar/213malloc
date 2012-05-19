@@ -19,9 +19,8 @@
  * License:  Don't use this for anything besides grading me (yet because it's not ready!)
  */
 
-/*  Experiments to run:
- *  - which node in trie for bestfit
- *  - extend heap right away
+/*  Experiments to run: // current best is 79%
+ *  - 
  */
 
 #include <stdio.h>

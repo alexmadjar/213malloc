@@ -192,9 +192,10 @@ static inline void *extend_heap(size_t bytes) {
       return NULL;
   /* Initialize free block header/footer and the epilogue header */
   HEADER(bp) = PACK(size, 0); /* Free block header */
-  FOOTER(bp) = PACK(size, 0); /* Free block footer */
+  FOOTER(bp) = HEADER(bp);     /* Free block footer */
   HEADER(NEXT_BLKP(bp)) = PACK(0, 1); /* New epilogue header */
-  // TODO: Not coellescing here could fragment space a bit
+  // not coallescing with possibly free previous here doesn't help in practice
+  // because it just moves the free block around unnecessarily
   return bp;
 }
 

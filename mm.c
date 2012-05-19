@@ -405,6 +405,12 @@ static struct freenode_t * leaf(struct freenode_t * n) {
   return n;
 }
 
+#define SAFE_SET(dest, source) if (((dest) = (source))!=NULL) (dest)->prev = &(dest)
+#define SET_CHILDREN(dest, source) \
+          SAFE_SET((dest)->children[0], (source)->children[0]); \
+          SAFE_SET((dest)->children[1], (source)->children[1])
+
+
 static void *freelist_add(void *bp) {
   #if DEBUG>1
     fprintf(stderr, "adding node %p (size=%lx) to the trie\n", bp, GET_SIZE(bp));
@@ -424,11 +430,8 @@ static void *freelist_add(void *bp) {
     if (GET_SIZE(*bin) == asize) {
       fn->prev = bin;
       fn->next = *bin;
-      if((fn->children[0] = (*bin)->children[0]) != NULL)
-        fn->children[0]->prev = &(fn->children[0]);
+      SET_CHILDREN(fn, *bin);
       (*bin)->children[0] = NULL;
-      if((fn->children[1] = (*bin)->children[1]) != NULL)
-        fn->children[1]->prev = &(fn->children[1]);
       (*bin)->children[1] = NULL;
       (*bin)->prev = &(fn->next);
       *bin = fn;
@@ -457,10 +460,7 @@ static void freelist_remove(void *bp) {
   if (fn->next != NULL) {
     fn->next->prev = fn->prev;
     *(fn->prev) = fn->next;
-    if((fn->next->children[0] = fn->children[0]) != NULL)
-      fn->children[0]->prev = &(fn->next->children[0]);
-    if((fn->next->children[1] = fn->children[1]) != NULL)
-      fn->children[1]->prev = &(fn->next->children[1]);
+    SET_CHILDREN(fn->next, fn);
     return;
   }
   struct freenode_t * ancestor = leaf(fn);
@@ -468,10 +468,7 @@ static void freelist_remove(void *bp) {
     *(fn->prev) = NULL;
   } else {
     *(ancestor->prev) = NULL;
-    if((ancestor->children[0] = fn->children[0]) != NULL)
-      ancestor->children[0]->prev = &(ancestor->children[0]);
-    if((ancestor->children[1] = fn->children[1]) != NULL)
-      ancestor->children[1]->prev = &(ancestor->children[1]);
+    SET_CHILDREN(ancestor, fn);
     ancestor->prev = fn->prev;
     *(fn->prev) = ancestor;
   }

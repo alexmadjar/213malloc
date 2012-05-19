@@ -1,26 +1,30 @@
-max alloc size is 262136 Bytes (or 0b111111111111111000 or 14 0's, 15 1's and 3 0's)
+max alloc size is TODO Bytes (or 0b1111111111111111111111111000 or 4 0's, 25 1's and 3 0's)
 because 256kB and larger are best done using mmap
 
-min alloc size is 4*sizeof(void*) => 16
+min alloc size is 4*sizeof(void*)
 because free nodes contain:
-node** prev // a pointer to the node* that points here
 node* next  // a pointer to the next node in the stack of the same size
 node* left  // a pointer to the left child in the trie
 node* right // a pointer to the right child in the trie
+node** prev // a pointer to the node* that points here
 
-every block (whether free or allocated) has a 1 WORD (from here on WORD is defined as sizeof(void*)=4 bytes) header and footer:
+NOTE: left and right are stored in an array in order to make access easier without using a branch statement. children[0] -> left [1] -> right
+
+every block (whether free or allocated) has a 1 WSIZE (from here on WSIZE is defined as sizeof(size_t)) header and footer:
 isAllocated = 0 or 1
 size = 8 byte aligned byte-size of the block (not including the header / footer)
 header/footer = size BITWISEOR isAllocated
+NOTE: The total space this takes up is size + DSIZE  where DSIZE is 2*WSIZE
 
-We create 14 bins of sizes by the number of zeros before the first 1 in the size (the clz function)
-because clz(max_size) = 14 and clz(min_size) = 27
-clz(size)-14 = bin number (0 through 13 inclusive)
+We create 24 bins of sizes by the number of zeros before the first 1 in the size (calculated using the clz function)
+because clz(max_size) = 4 and clz(min_size) = 27
+clz(size)-4 = bin number (0 through 23 inclusive)
 
 We divide the heap space as such: (key: *=pointer, not a size; in increasing address space)
 *heap base*
 unused padding bytes for alignment +
-14 WORDs for the size buckets
+* "heap" pointer *
+24 WORDs for the size buckets
 1 WORD set to "1"
 *official heap start pointer*
 1 WORD set to "1" - prologue

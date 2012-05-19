@@ -399,12 +399,12 @@ static struct freenode_t * leaf(struct freenode_t * n);
 
 static struct freenode_t * leaf(struct freenode_t * n) {
   leaf_loop:
-  if (n->children[0] != NULL) {
-    n = n->children[0];
-    goto leaf_loop;
-  }
   if (n->children[1] != NULL) {
     n = n->children[1];
+    goto leaf_loop;
+  }
+  if (n->children[0] != NULL) {
+    n = n->children[0];
     goto leaf_loop;
   }
   return n;

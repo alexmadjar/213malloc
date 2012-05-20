@@ -92,8 +92,10 @@ struct freenode_t
 #define DSIZE (2*(WSIZE))
 #define BITNESS  (CHAR_BIT*POINTER_SIZE)
 #define MIN_SIZE ((size_t)(ALIGN(sizeof(struct freenode_t))))
+// bit position of the first bin
 #define BIT_OFFSET (__builtin_clzl(MAX_SIZE))
 #define LSIG_BIT_OF_SIZE  (__builtin_clzl(ALIGNMENT))
+// number of bins is bit pos of smallest - that of the largest plus one
 #define BIT_COUNT  (1 + (__builtin_clzl(MIN_SIZE)) - BIT_OFFSET)
 /* struct heaphead_t
  * 
@@ -208,8 +210,7 @@ static inline void *extend_heap(size_t bytes) {
   HEADER(bp) = PACK(size, 0); /* Free block header */
   FOOTER(bp) = HEADER(bp);     /* Free block footer */
   HEADER(NEXT_BLKP(bp)) = PACK(0, 1); /* New epilogue header */
-  // not coallescing with possibly free previous here doesn't help in practice
-  // because it just moves the free block around unnecessarily
+  // coallescing here didn't help efficiency in testing
   return bp;
 }
 
@@ -421,6 +422,7 @@ void *mm_realloc(void *ptr, size_t size)
 
 // finds the rightmost leaf of the trie
 // NOTE: rightmost is more efficient than leftmost in trials
+// Also note: this is best implemented using goto, trust me
 static struct freenode_t * leaf(struct freenode_t * n) {
   leaf_loop:
   if (n->children[1] != NULL) {
@@ -446,31 +448,31 @@ static void *freelist_add(void *bp) {
     return NULL;
   }
   size_t bit = BIN_FOR(asize);
-  struct freenode_t ** bin = &(heap->bins[bit]); // bin has the address of the bin pointer
+  struct freenode_t ** node = &(heap->bins[bit]); // node has the address of the bin pointer
   bit += BIT_OFFSET;
   struct freenode_t * fn = (struct freenode_t *)bp;
   while(1) {
-    if (*bin == NULL) {
-      *bin = fn;
-      fn->prev = bin;
+    if (*node == NULL) {
+      *node = fn;
+      fn->prev = node;
       fn->next = fn->children[0] = fn->children[1] = NULL;
       return bp;
     }
-    if (GET_SIZE(*bin) == asize) {
-      fn->prev = bin;
-      fn->next = *bin;
-      SET_CHILDREN(fn, *bin);
-      (*bin)->children[0] = NULL;
-      (*bin)->children[1] = NULL;
-      (*bin)->prev = &(fn->next);
-      *bin = fn;
+    if (GET_SIZE(*node) == asize) {
+      fn->prev = node;
+      fn->next = *node;
+      SET_CHILDREN(fn, *node);
+      (*node)->children[0] = NULL;
+      (*node)->children[1] = NULL;
+      (*node)->prev = &(fn->next);
+      *node = fn;
       return bp;
     }
     ++bit;
     #if DEBUG>1
     fprintf(stderr, "bit=%lu, size=%lx, bit_n=%lu\n", bit, asize, BIT_N(asize,bit));
     #endif
-    bin = &((*bin)->children[BIT_N(asize,bit)]);
+    node = &((*node)->children[BIT_N(asize,bit)]);
     #if DEBUG
       if (bit > 64) {
         fprintf(stderr, "!! Infinite loop in freelist_add!\n");
@@ -506,41 +508,41 @@ static void freelist_remove(void *bp) {
 static void *freelist_bestfit(size_t sz) {
   struct freenode_t * bestfit = NULL;
   size_t bit = BIN_FOR(sz);
-  struct freenode_t * bin = heap->bins[bit]; // bin has the address of the bin pointer
+  struct freenode_t * node = heap->bins[bit]; // node has the address of the bin pointer
   // try the correct bin first
-  while (bin) {
+  while (node) {
     #if DEBUG
       if (bit > LSIG_BIT_OF_SIZE) {
         fprintf(stderr, "!! bestfit went beyond normal trie depth!\n");
         break;
       }
     #endif
-    size_t s = GET_SIZE(bin);
+    size_t s = GET_SIZE(node);
     if (s == sz) {
-      return bin;
+      return node;
     }
     if (s > sz) {
       if ((bestfit == NULL) || (s < GET_SIZE(bestfit))) {
-        bestfit = bin;
+        bestfit = node;
       }
     }
     ++bit;
-    bin = bin->children[BIT_N(sz,bit)];
+    node = node->children[BIT_N(sz,bit)];
   }
   if (bestfit != NULL) {
     return bestfit;
   }
   // if that doesn't work find anything larger
   for (bit = BIN_FOR(sz)-1; bit > 0; bit--) {
-    bin = heap->bins[bit];
-    if (bin != NULL) {
-      return bin;
+    node = heap->bins[bit];
+    if (node != NULL) {
+      return node;
     }
   }
   // once more for bit = 0
-  bin = heap->bins[bit];
-  if (bin != NULL) {
-    return bin;
+  node = heap->bins[bit];
+  if (node != NULL) {
+    return node;
   }
   // guess we got nothing for you
   return NULL;
@@ -766,22 +768,24 @@ I hope you find this interesting.
 max alloc size is 268,435,448 Bytes (256 MB or 0b1111111111111111111111111000 or 4 0's, 25 1's and 3 0's)
 because 256MB and larger are best done using mmap
 
-min alloc size is 4*sizeof(void*)
-because free nodes contain:
-node* next  // a pointer to the next node in the stack of the same size
-node* left  // a pointer to the left child in the trie
-node* right // a pointer to the right child in the trie
-node** prev // a pointer to the node* that points here
-
-NOTE: left and right are stored in an array in order to make access easier without using a branch statement. children[0] -> left [1] -> right
-
 every block (whether free or allocated) has a 1 WSIZE (from here on WSIZE is defined as sizeof(size_t)) header and footer:
 isAllocated = 0 or 1
 size = 8 byte aligned byte-size of the block (not including the header / footer)
 header/footer = size BITWISEOR isAllocated
+
+in addition, free blocks contain (inside their data segment):
+node* next  // a pointer to the next node in the stack of the same size
+node* left  // a pointer to the left child in the trie
+node* right // a pointer to the right child in the trie
+node** prev // a pointer to the node* that points here
+NOTE: left and right are stored in an array in order to make access easier without using a branch statement. children[0] -> left [1] -> right
+
+because freenodes must contain this info, the min alloc size is 4*sizeof(void*)
+
 NOTE: The total space this takes up is size + DSIZE  where DSIZE is 2*WSIZE
 
-We create 24 bins of sizes by the number of zeros before the first 1 in the size (calculated using the clz function)
+We create 24 bins of sizes by the number of zeros before the first 1 in the size 
+(calculated using the clz function which returns the number of 0's)
 because clz(max_size) = 4 and clz(min_size) = 27
 clz(size)-4 = bin number (0 through 23 inclusive)
 

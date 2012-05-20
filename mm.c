@@ -450,22 +450,22 @@ static void *freelist_add(void *bp) {
   size_t bit = BIN_FOR(asize);
   struct freenode_t ** node = &(heap->bins[bit]); // node has the address of the bin pointer
   bit += BIT_OFFSET;
-  struct freenode_t * fn = (struct freenode_t *)bp;
+  struct freenode_t * new_node = (struct freenode_t *)bp;
   while(1) {
     if (*node == NULL) {
-      *node = fn;
-      fn->prev = node;
-      fn->next = fn->children[0] = fn->children[1] = NULL;
+      *node = new_node;
+      new_node->prev = node;
+      new_node->next = new_node->children[0] = new_node->children[1] = NULL;
       return bp;
     }
     if (GET_SIZE(*node) == asize) {
-      fn->prev = node;
-      fn->next = *node;
-      SET_CHILDREN(fn, *node);
+      new_node->prev = node;
+      new_node->next = *node;
+      SET_CHILDREN(new_node, *node);
       (*node)->children[0] = NULL;
       (*node)->children[1] = NULL;
-      (*node)->prev = &(fn->next);
-      *node = fn;
+      (*node)->prev = &(new_node->next);
+      *node = new_node;
       return bp;
     }
     ++bit;
@@ -486,22 +486,22 @@ static void freelist_remove(void *bp) {
   #if DEBUG>1
     fprintf(stderr, "removing node %p (size=%lx) from the trie\n", bp, GET_SIZE(bp));
   #endif
-  struct freenode_t * fn = (struct freenode_t *)bp;
+  struct freenode_t * node = (struct freenode_t *)bp;
   // if part of LL
-  if (fn->next != NULL) {
-    fn->next->prev = fn->prev;
-    *(fn->prev) = fn->next;
-    SET_CHILDREN(fn->next, fn);
+  if (node->next != NULL) {
+    node->next->prev = node->prev;
+    *(node->prev) = node->next;
+    SET_CHILDREN(node->next, node);
     return;
   }
-  struct freenode_t * ancestor = leaf(fn);
-  if (ancestor == fn) {
-    *(fn->prev) = NULL;
+  struct freenode_t * ancestor = leaf(node);
+  if (ancestor == node) {
+    *(node->prev) = NULL;
   } else {
     *(ancestor->prev) = NULL;
-    SET_CHILDREN(ancestor, fn);
-    ancestor->prev = fn->prev;
-    *(fn->prev) = ancestor;
+    SET_CHILDREN(ancestor, node);
+    ancestor->prev = node->prev;
+    *(node->prev) = ancestor;
   }
 }
 

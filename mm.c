@@ -448,31 +448,31 @@ static void *freelist_add(void *bp) {
     return NULL;
   }
   size_t bit = BIN_FOR(asize);
-  struct freenode_t ** node = &(heap->bins[bit]); // node has the address of the bin pointer
+  struct freenode_t ** node_ptr = &(heap->bins[bit]); // node has the address of the bin pointer
   bit += BIT_OFFSET;
   struct freenode_t * new_node = (struct freenode_t *)bp;
   while(1) {
-    if (*node == NULL) {
-      *node = new_node;
-      new_node->prev = node;
+    if (*node_ptr == NULL) {
+      *node_ptr = new_node;
+      new_node->prev = node_ptr;
       new_node->next = new_node->children[0] = new_node->children[1] = NULL;
       return bp;
     }
-    if (GET_SIZE(*node) == asize) {
-      new_node->prev = node;
-      new_node->next = *node;
-      SET_CHILDREN(new_node, *node);
-      (*node)->children[0] = NULL;
-      (*node)->children[1] = NULL;
-      (*node)->prev = &(new_node->next);
-      *node = new_node;
+    if (GET_SIZE(*node_ptr) == asize) {
+      new_node->prev = node_ptr;
+      new_node->next = *node_ptr;
+      SET_CHILDREN(new_node, *node_ptr);
+      (*node_ptr)->children[0] = NULL;
+      (*node_ptr)->children[1] = NULL;
+      (*node_ptr)->prev = &(new_node->next);
+      *node_ptr = new_node;
       return bp;
     }
     ++bit;
     #if DEBUG>1
     fprintf(stderr, "bit=%lu, size=%lx, bit_n=%lu\n", bit, asize, BIT_N(asize,bit));
     #endif
-    node = &((*node)->children[BIT_N(asize,bit)]);
+    node_ptr = &((*node_ptr)->children[BIT_N(asize,bit)]);
     #if DEBUG
       if (bit > 64) {
         fprintf(stderr, "!! Infinite loop in freelist_add!\n");

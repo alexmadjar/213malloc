@@ -19,7 +19,7 @@
  * Author: Alex Madjar
  * License:  Don't use this for anything besides grading me ;)
  */
-
+// best = 80%
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -189,6 +189,27 @@ int mm_init(void)
   return 0;
 }
 
+// returns the bp of the last block in the heap
+static inline void *last_block() {
+  size_t *foot = mem_heap_hi() + 1 - DSIZE;
+  return foot - PACK_SIZE(*foot);
+} 
+
+// extends the size of the last block in the heap to be at least asize
+static inline void *extend_block(size_t asize) {
+  void *bp = last_block();
+  size_t csize = GET_SIZE(bp);
+  if (csize >= asize) return bp;
+  size_t diff = asize - csize;
+  void *old_end = mem_sbrk(diff);
+  if (old_end == (void*)-1) return NULL;
+  size_t *epilogue = old_end - DSIZE + diff;
+  epilogue[1] = PACK(0,1);
+  epilogue[0] = PACK(asize, IS_ALLOC(bp));
+  HEADER(bp) = epilogue[0];
+  return bp;
+}
+
 // extends the heap by bytes. NOTE: doesn't change the freelist
 static inline void *extend_heap(size_t bytes) {
   #if DEBUG>1
@@ -204,6 +225,12 @@ static inline void *extend_heap(size_t bytes) {
   #endif
   /* Allocate an even number of words to maintain alignment */
   size = ALIGN(bytes);
+  void *lastblock = last_block();
+  if (!IS_ALLOC(lastblock)) {
+    freelist_remove(lastblock);
+    return extend_block(size);
+  }
+
   if ((long)(bp = mem_sbrk(DSIZE+size)) == -1)
       return NULL;
   /* Initialize free block header/footer and the epilogue header */
@@ -375,17 +402,26 @@ void *mm_realloc(void *ptr, size_t size)
     size = ALIGN(size);
     long diff = size - GET_SIZE(ptr);
     if (diff <= 0) {
+      // resize in-place by freeing the part after it
+      // TODO test using dumb_realloc here
       place(ptr, size);
     } else {
       void *nxt_block = NEXT_BLKP(ptr);
       if ((!IS_ALLOC(nxt_block)) && (DSIZE + GET_SIZE(nxt_block) >= diff)) {
+          // resize in place with next block
           freelist_remove(nxt_block);
           size_t csize = DSIZE + GET_SIZE(nxt_block) + GET_SIZE(ptr);
           HEADER(ptr) = PACK(csize, 1);
           FOOTER(ptr) = PACK(csize, 1);
           place(ptr, size);
       } else {
+        if (ptr == last_block()) {
+          // resize in place by extending the heap
+          return extend_block(size);
+        } else {
+          // use the naive alloc / free as last resort
           ptr = dumb_realloc(ptr, size);
+        }
       }
     }
     #if DEBUG
@@ -494,14 +530,14 @@ static void freelist_remove(void *bp) {
     SET_CHILDREN(node->next, node);
     return;
   }
-  struct freenode_t * ancestor = get_leaf(node);
-  if (ancestor == node) {
+  struct freenode_t * descendant = get_leaf(node);
+  if (descendant == node) {
     *(node->prev) = NULL;
   } else {
-    *(ancestor->prev) = NULL;
-    SET_CHILDREN(ancestor, node);
-    ancestor->prev = node->prev;
-    *(node->prev) = ancestor;
+    *(descendant->prev) = NULL;
+    SET_CHILDREN(descendant, node);
+    descendant->prev = node->prev;
+    *(node->prev) = descendant;
   }
 }
 

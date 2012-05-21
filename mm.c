@@ -111,8 +111,9 @@ struct heaphead_t
   size_t head[1];
 };
 
-// The global heap pointer (NOTE: the only global variable in the system)
+// The global heap pointers
 struct heaphead_t * heap;
+void *last_block;
 
 
 /* Basic macro functions */
@@ -185,29 +186,25 @@ int mm_init(void)
         return -1;
       }
    #endif
-  
+  last_block = heap->head;
   return 0;
 }
 
-// returns the bp of the last block in the heap
-static inline void *last_block() {
-  size_t *foot = mem_heap_hi() + 1 - DSIZE;
-  return foot - PACK_SIZE(*foot);
-} 
-
 // extends the size of the last block in the heap to be at least asize
 static inline void *extend_block(size_t asize) {
-  void *bp = last_block();
-  size_t csize = GET_SIZE(bp);
-  if (csize >= asize) return bp;
+  #if DEBUG>1
+  fprintf(stderr, "Extending %p (size=%lx) to size %lx\n", last_block, GET_SIZE(last_block), asize);
+  #endif
+  size_t csize = GET_SIZE(last_block);
+  if (csize >= asize) return last_block;
   size_t diff = asize - csize;
   void *old_end = mem_sbrk(diff);
   if (old_end == (void*)-1) return NULL;
   size_t *epilogue = old_end - DSIZE + diff;
   epilogue[1] = PACK(0,1);
-  epilogue[0] = PACK(asize, IS_ALLOC(bp));
-  HEADER(bp) = epilogue[0];
-  return bp;
+  epilogue[0] = PACK(asize, IS_ALLOC(last_block));
+  HEADER(last_block) = epilogue[0];
+  return last_block;
 }
 
 // extends the heap by bytes. NOTE: doesn't change the freelist
@@ -225,9 +222,11 @@ static inline void *extend_heap(size_t bytes) {
   #endif
   /* Allocate an even number of words to maintain alignment */
   size = ALIGN(bytes);
-  void *lastblock = last_block();
-  if (!IS_ALLOC(lastblock)) {
-    freelist_remove(lastblock);
+  if (!IS_ALLOC(last_block)) {
+    #if DEBUG>1
+    fprintf(stderr, "extending the heap via the last free block %p (header=%lx)\n", last_block, HEADER(last_block));
+    #endif
+    freelist_remove(last_block);
     return extend_block(size);
   }
 
@@ -238,7 +237,7 @@ static inline void *extend_heap(size_t bytes) {
   FOOTER(bp) = HEADER(bp);     /* Free block footer */
   HEADER(NEXT_BLKP(bp)) = PACK(0, 1); /* New epilogue header */
   // coallescing here didn't help efficiency in testing
-  return bp;
+  return last_block = bp;
 }
 
 void mm_free(void *bp){
@@ -277,6 +276,7 @@ static inline void *coalesce(void *bp)
     #endif
     freelist_remove(next);
     size += DSIZE + GET_SIZE(next);
+    if (last_block == next) last_block = bp;
     HEADER(bp) = PACK(size, 0);
     FOOTER(bp) = PACK(size, 0);
   }
@@ -285,6 +285,7 @@ static inline void *coalesce(void *bp)
       fprintf(stderr, "Coalescing %p with previous block\n", bp);
     #endif
     freelist_remove(PREV_BLKP(bp));
+    if (last_block == bp) last_block = PREV_BLKP(bp);
     size += DSIZE + PACK_SIZE(PREV_FOOTER(bp));
     FOOTER(bp) = PACK(size, 0);
     bp = PREV_BLKP(bp);
@@ -295,10 +296,11 @@ static inline void *coalesce(void *bp)
       fprintf(stderr, "Coalescing %p with neighboring blocks\n", bp);
     #endif
     bp = PREV_BLKP(bp);
+    if (last_block == next) last_block = bp;
     freelist_remove(bp);
     freelist_remove(next);
     size += GET_SIZE(bp) +
-    GET_SIZE(next) + (DSIZE*2);
+      GET_SIZE(next) + (DSIZE*2);
     HEADER(bp) = PACK(size, 0);
     FOOTER(next) = PACK(size, 0);
   }
@@ -365,7 +367,8 @@ static inline void place(void* bp, size_t asize) {
   if ((csize - asize) >= MIN_SIZE + DSIZE) {
     HEADER(bp) = PACK(asize, 1);
     FOOTER(bp) = PACK(asize, 1);
-    bp = NEXT_BLKP(bp);
+    if (bp == last_block) last_block = bp = NEXT_BLKP(bp);
+    else bp = NEXT_BLKP(bp);
     csize = csize - asize - DSIZE;
     HEADER(bp) = PACK(csize, 0);
     FOOTER(bp) = PACK(csize, 0);
@@ -403,7 +406,6 @@ void *mm_realloc(void *ptr, size_t size)
     long diff = size - GET_SIZE(ptr);
     if (diff <= 0) {
       // resize in-place by freeing the part after it
-      // TODO test using dumb_realloc here
       place(ptr, size);
     } else {
       void *nxt_block = NEXT_BLKP(ptr);
@@ -415,9 +417,9 @@ void *mm_realloc(void *ptr, size_t size)
           FOOTER(ptr) = PACK(csize, 1);
           place(ptr, size);
       } else {
-        if (ptr == last_block()) {
+        if (ptr == last_block) {
           // resize in place by extending the heap
-          return extend_block(size);
+          ptr = extend_block(size);
         } else {
           // use the naive alloc / free as last resort
           ptr = dumb_realloc(ptr, size);

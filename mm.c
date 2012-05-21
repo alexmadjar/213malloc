@@ -19,7 +19,7 @@
  * Author: Alex Madjar
  * License:  Don't use this for anything besides grading me ;)
  */
-// best = 80%
+// best = 87%
 
 #include <stdio.h>
 #include <stdlib.h>

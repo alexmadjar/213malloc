@@ -423,7 +423,7 @@ void *mm_realloc(void *ptr, size_t size)
 // finds the rightmost leaf of the trie
 // NOTE: rightmost is more efficient than leftmost in trials
 // Also note: this is best implemented using goto, trust me
-static struct freenode_t * leaf(struct freenode_t * n) {
+static struct freenode_t * get_leaf(struct freenode_t * n) {
   leaf_loop:
   if (n->children[1] != NULL) {
     n = n->children[1];
@@ -494,7 +494,7 @@ static void freelist_remove(void *bp) {
     SET_CHILDREN(node->next, node);
     return;
   }
-  struct freenode_t * ancestor = leaf(node);
+  struct freenode_t * ancestor = get_leaf(node);
   if (ancestor == node) {
     *(node->prev) = NULL;
   } else {
@@ -503,6 +503,25 @@ static void freelist_remove(void *bp) {
     ancestor->prev = node->prev;
     *(node->prev) = ancestor;
   }
+}
+
+static void *smallest_ancestor(struct freenode_t *node) {
+  struct freenode_t *smallest = node;
+  while (1) {
+    if (node->children[0] != NULL) {
+      node = node->children[0];
+    } else {
+      if (node->children[1] != NULL) {
+        node = node->children[1];
+      } else {
+        break;
+      }
+    }
+    if (GET_SIZE(node) < GET_SIZE(smallest)) {
+      smallest = node;
+    }
+  }
+  return smallest;
 }
 
 static void *freelist_bestfit(size_t sz) {
@@ -536,7 +555,7 @@ static void *freelist_bestfit(size_t sz) {
   for (bit = BIN_FOR(sz)-1; bit > 0; bit--) {
     node = heap->bins[bit];
     if (node != NULL) {
-      return node;
+      return smallest_ancestor(node);
     }
   }
   // once more for bit = 0

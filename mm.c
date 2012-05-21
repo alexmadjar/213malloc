@@ -460,17 +460,17 @@ void *mm_realloc(void *ptr, size_t size)
 
 // finds the rightmost leaf of the trie
 // NOTE: rightmost is more efficient than leftmost in trials
-// Also note: this is best implemented using goto, trust me
 static struct freenode_t * get_leaf(struct freenode_t * n) {
-  leaf_loop:
-  if (n->children[1] != NULL) {
-    n = n->children[1];
-    goto leaf_loop;
-  }
-  if (n->children[0] != NULL) {
-    n = n->children[0];
-    goto leaf_loop;
-  }
+  do {
+    if (n->children[1] != NULL) {
+      n = n->children[1];
+      continue;
+    }
+    if (n->children[0] != NULL) {
+      n = n->children[0];
+      continue;
+    }
+  } while (FALSE);
   return n;
 }
 

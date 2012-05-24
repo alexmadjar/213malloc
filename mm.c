@@ -475,7 +475,11 @@ static struct freenode_t * get_leaf(struct freenode_t * n) {
       n = n->children[0];
       continue;
     }
-  } while (FALSE);
+    break;
+  } while (TRUE);
+  #if DEBUG>1
+  fprintf(stderr, "get_leaf returning %p (size=%lx)\n", n, GET_SIZE(n));
+  #endif
   return n;
 }
 
